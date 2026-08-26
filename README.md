@@ -42,7 +42,7 @@ There is no Node server, database, Cloudflare Function, D1 database, VPS or buil
 - CSV/TXT export and in-memory Activity.
 - English default with PT/EN switch.
 - Version card simplified to a **white `v14` tile** matching the surrounding media cards.
-- **Built in Portugal. Ready for the world.** is now a prominent part of the product identity.
+- **Built in Portugal. Ready for the world.**
 
 ## Demo
 
