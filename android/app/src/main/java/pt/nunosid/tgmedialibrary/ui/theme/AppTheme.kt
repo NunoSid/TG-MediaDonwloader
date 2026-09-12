@@ -1,20 +1,60 @@
 package pt.nunosid.tgmedialibrary.ui.theme
 
+import androidx.compose.foundation.shape.RectangleShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
+val ReplayInk = Color(0xFF111111)
+val ReplayPaper = Color(0xFFF3F0E8)
+val ReplayPanel = Color(0xFFFFFDF7)
+val ReplayMuted = Color(0xFF6F6B62)
+val ReplaySoftLine = Color(0xFFC9C4B8)
+val ReplayAcid = Color(0xFFE7FF3F)
+val ReplayCyan = Color(0xFF62E7FF)
+val ReplayPink = Color(0xFFFF6FAE)
+val ReplayDanger = Color(0xFFFF4C4C)
+
 private val AppColors = lightColorScheme(
-    primary = Color(0xFF0B74DE),
-    onPrimary = Color.White,
-    surface = Color(0xFFF8FAFC),
-    background = Color.White,
-    onBackground = Color(0xFF111827),
-    onSurface = Color(0xFF111827)
+    primary = ReplayAcid,
+    onPrimary = ReplayInk,
+    primaryContainer = ReplayAcid,
+    onPrimaryContainer = ReplayInk,
+    secondary = ReplayCyan,
+    onSecondary = ReplayInk,
+    secondaryContainer = ReplayCyan,
+    onSecondaryContainer = ReplayInk,
+    tertiary = ReplayPink,
+    onTertiary = ReplayInk,
+    tertiaryContainer = ReplayPink,
+    onTertiaryContainer = ReplayInk,
+    error = ReplayDanger,
+    onError = Color.White,
+    background = ReplayPaper,
+    onBackground = ReplayInk,
+    surface = ReplayPanel,
+    onSurface = ReplayInk,
+    surfaceVariant = Color(0xFFECE8DE),
+    onSurfaceVariant = ReplayMuted,
+    outline = ReplayInk,
+    outlineVariant = ReplaySoftLine
+)
+
+private val ReplayShapes = Shapes(
+    extraSmall = RectangleShape,
+    small = RectangleShape,
+    medium = RectangleShape,
+    large = RectangleShape,
+    extraLarge = RectangleShape
 )
 
 @Composable
 fun TelegramMediaLibraryTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = AppColors, content = content)
+    MaterialTheme(
+        colorScheme = AppColors,
+        shapes = ReplayShapes,
+        content = content
+    )
 }
