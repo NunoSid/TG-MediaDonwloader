@@ -9,8 +9,8 @@ import java.io.RandomAccessFile
 
 /**
  * Media3 DataSource backed by TDLib partial file requests.
- * Only the range needed by the player is fetched. Closing a segment cancels the active
- * range request but deliberately keeps TDLib's cache intact so seek/reopen remains smooth.
+ * Only the range needed by the player is fetched. Segment closes only cancel the current
+ * range; the enclosing player screen purges the TDLib file when playback ends/locks.
  */
 class TelegramStreamingDataSource(
     private val engine: TelegramEngine,
@@ -25,6 +25,7 @@ class TelegramStreamingDataSource(
 
     override fun open(dataSpec: DataSpec): Long {
         transferInitializing(dataSpec)
+        engine.markTransientFile(fileId)
         uri = dataSpec.uri
         position = dataSpec.position
         opened = true
@@ -36,6 +37,7 @@ class TelegramStreamingDataSource(
         if (length == 0) return 0
         if (position >= totalSize) return C.RESULT_END_OF_INPUT
 
+        engine.markTransientFile(fileId)
         val requested = minOf(length.toLong(), 1024L * 1024L, totalSize - position).toInt()
         val file = engine.sendBlocking(TdApi.DownloadFile(fileId, 32, position, requested.toLong(), true), 60)
         val path = file.local.path
