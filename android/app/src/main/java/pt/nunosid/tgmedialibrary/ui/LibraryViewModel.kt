@@ -1,6 +1,7 @@
 package pt.nunosid.tgmedialibrary.ui
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -8,17 +9,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 import pt.nunosid.tgmedialibrary.data.TelegramVideoRepository
 import pt.nunosid.tgmedialibrary.data.ThumbnailMemoryCache
+import pt.nunosid.tgmedialibrary.model.FilterPreset
 import pt.nunosid.tgmedialibrary.model.HistoryScope
 import pt.nunosid.tgmedialibrary.model.VideoFilters
 import pt.nunosid.tgmedialibrary.model.VideoItem
+import pt.nunosid.tgmedialibrary.model.VideoSort
 import pt.nunosid.tgmedialibrary.telegram.TelegramAuthState
 import pt.nunosid.tgmedialibrary.telegram.TelegramEngine
+import java.util.UUID
 
 class LibraryViewModel(application: Application) : AndroidViewModel(application) {
     val engine = TelegramEngine(application)
     private val repository = TelegramVideoRepository(engine)
+    private val presetPrefs = application.getSharedPreferences("filter_presets", Context.MODE_PRIVATE)
 
     val authState = engine.authState
     val connectionLabel = engine.connectionLabel
@@ -30,6 +37,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     val videos: StateFlow<List<VideoItem>> = _videos.asStateFlow()
     private val _filters = MutableStateFlow(VideoFilters())
     val filters: StateFlow<VideoFilters> = _filters.asStateFlow()
+    private val _filterPresets = MutableStateFlow(loadPresets())
+    val filterPresets: StateFlow<List<FilterPreset>> = _filterPresets.asStateFlow()
     private val _historyScope = MutableStateFlow(HistoryScope.LAST_500)
     val historyScope: StateFlow<HistoryScope> = _historyScope.asStateFlow()
     private val _loading = MutableStateFlow(false)
@@ -63,6 +72,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun lockPrivacy() {
         ThumbnailMemoryCache.clear()
+        engine.purgeTransientFilesAsync()
         _privacyUnlocked.value = false
     }
 
@@ -84,6 +94,30 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun updateFilters(transform: (VideoFilters) -> VideoFilters) {
         _filters.value = transform(_filters.value)
+    }
+
+    fun applyPreset(preset: FilterPreset) {
+        _filters.value = preset.filters
+    }
+
+    fun savePreset(name: String, filters: VideoFilters = _filters.value) {
+        val clean = name.trim().take(40)
+        if (clean.isBlank()) return
+        val current = _filterPresets.value.toMutableList()
+        val existingIndex = current.indexOfFirst { it.name.equals(clean, ignoreCase = true) }
+        val preset = if (existingIndex >= 0) {
+            current[existingIndex].copy(name = clean, filters = filters)
+        } else {
+            FilterPreset(UUID.randomUUID().toString(), clean, filters)
+        }
+        if (existingIndex >= 0) current[existingIndex] = preset else current.add(preset)
+        _filterPresets.value = current.sortedBy { it.name.lowercase() }
+        persistPresets(_filterPresets.value)
+    }
+
+    fun deletePreset(id: String) {
+        _filterPresets.value = _filterPresets.value.filterNot { it.id == id }
+        persistPresets(_filterPresets.value)
     }
 
     fun selectHistoryScope(scope: HistoryScope) {
@@ -115,8 +149,51 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _loading.value = false
     }
 
+    private fun loadPresets(): List<FilterPreset> {
+        val raw = presetPrefs.getString(PRESETS_KEY, null) ?: return emptyList()
+        return runCatching {
+            val array = JSONArray(raw)
+            buildList {
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val filters = VideoFilters(
+                        query = obj.optString("query", ""),
+                        chatId = obj.optLongNullable("chatId"),
+                        minBytes = obj.optLongNullable("minBytes"),
+                        maxBytes = obj.optLongNullable("maxBytes"),
+                        minDuration = obj.optIntNullable("minDuration"),
+                        maxDuration = obj.optIntNullable("maxDuration"),
+                        sort = runCatching { VideoSort.valueOf(obj.optString("sort", VideoSort.NEWEST.name)) }
+                            .getOrDefault(VideoSort.NEWEST)
+                    )
+                    add(FilterPreset(obj.getString("id"), obj.getString("name"), filters))
+                }
+            }.sortedBy { it.name.lowercase() }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun persistPresets(presets: List<FilterPreset>) {
+        val array = JSONArray()
+        presets.forEach { preset ->
+            val f = preset.filters
+            array.put(JSONObject().apply {
+                put("id", preset.id)
+                put("name", preset.name)
+                put("query", f.query)
+                putNullable("chatId", f.chatId)
+                putNullable("minBytes", f.minBytes)
+                putNullable("maxBytes", f.maxBytes)
+                putNullable("minDuration", f.minDuration)
+                putNullable("maxDuration", f.maxDuration)
+                put("sort", f.sort.name)
+            })
+        }
+        presetPrefs.edit().putString(PRESETS_KEY, array.toString()).apply()
+    }
+
     override fun onCleared() {
         ThumbnailMemoryCache.clear()
+        engine.purgeTransientFilesAsync()
         engine.close()
         super.onCleared()
     }
@@ -124,5 +201,16 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     companion object {
         private const val ENTRY_CODE = "21031991"
         const val PANIC_CODE = "112"
+        private const val PRESETS_KEY = "presets_json"
     }
 }
+
+private fun JSONObject.putNullable(key: String, value: Any?) {
+    if (value == null) put(key, JSONObject.NULL) else put(key, value)
+}
+
+private fun JSONObject.optLongNullable(key: String): Long? =
+    if (!has(key) || isNull(key)) null else optLong(key)
+
+private fun JSONObject.optIntNullable(key: String): Int? =
+    if (!has(key) || isNull(key)) null else optInt(key)
