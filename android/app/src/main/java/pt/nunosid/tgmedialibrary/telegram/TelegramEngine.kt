@@ -137,6 +137,20 @@ class TelegramEngine(private val context: Context) {
     fun submitCode(code: String) = send(TdApi.CheckAuthenticationCode(code.trim()))
     fun submitPassword(password: String) = send(TdApi.CheckAuthenticationPassword(password))
 
+    fun downloadFilePath(fileId: Int, priority: Int = 16, timeoutSeconds: Long = 1800): String {
+        val result = sendBlocking(
+            TdApi.DownloadFile(fileId, priority, 0, 0, true),
+            timeoutSeconds = timeoutSeconds
+        )
+        val path = result.local?.path.orEmpty()
+        check(path.isNotBlank()) { "O Telegram não devolveu um ficheiro local." }
+        return path
+    }
+
+    fun deleteLocalFile(fileId: Int) {
+        runCatching { sendBlocking(TdApi.DeleteFile(fileId), timeoutSeconds = 30) }
+    }
+
     fun <T : TdApi.Object> send(function: TdApi.Function<T>, onResult: ((T) -> Unit)? = null) {
         val active = client ?: return
         active.send(function) { result ->
