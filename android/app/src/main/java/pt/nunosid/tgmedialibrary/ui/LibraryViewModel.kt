@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import pt.nunosid.tgmedialibrary.data.TelegramVideoRepository
+import pt.nunosid.tgmedialibrary.data.ThumbnailMemoryCache
 import pt.nunosid.tgmedialibrary.model.HistoryScope
 import pt.nunosid.tgmedialibrary.model.VideoFilters
 import pt.nunosid.tgmedialibrary.model.VideoItem
@@ -61,10 +62,12 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun lockPrivacy() {
+        ThumbnailMemoryCache.clear()
         _privacyUnlocked.value = false
     }
 
     fun panicWipe() {
+        ThumbnailMemoryCache.clear()
         _privacyUnlocked.value = false
         _videos.value = emptyList()
         _filters.value = VideoFilters()
@@ -113,6 +116,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     override fun onCleared() {
+        ThumbnailMemoryCache.clear()
         engine.close()
         super.onCleared()
     }
