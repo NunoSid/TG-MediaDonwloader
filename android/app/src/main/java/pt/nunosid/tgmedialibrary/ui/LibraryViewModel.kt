@@ -26,6 +26,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     val privacyUnlocked: StateFlow<Boolean> = _privacyUnlocked.asStateFlow()
 
     private val _videos = MutableStateFlow<List<VideoItem>>(emptyList())
+    val videos: StateFlow<List<VideoItem>> = _videos.asStateFlow()
     private val _filters = MutableStateFlow(VideoFilters())
     val filters: StateFlow<VideoFilters> = _filters.asStateFlow()
     private val _historyScope = MutableStateFlow(HistoryScope.LAST_500)
@@ -83,6 +84,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun selectHistoryScope(scope: HistoryScope) {
+        if (_loading.value || scope == _historyScope.value && _videos.value.isNotEmpty()) return
         _historyScope.value = scope
         loadHistory(scope)
     }
