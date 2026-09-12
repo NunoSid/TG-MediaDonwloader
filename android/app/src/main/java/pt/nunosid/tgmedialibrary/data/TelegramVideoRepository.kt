@@ -24,7 +24,6 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
         val targetCount = scope.targetCount()
         val minDate = scope.minDateUnix()
 
-        // Cloud/global search does not include secret chats. Scan each relevant media class.
         val globalFilters: List<TdApi.SearchMessagesFilter> = listOf(
             TdApi.SearchMessagesFilterVideo(),
             TdApi.SearchMessagesFilterAnimation(),
@@ -64,9 +63,10 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
             }
         }
 
-        // searchMessages explicitly excludes secret chats. TDLib supports them only locally on
-        // the device where they exist, so enumerate those chats and page their history directly.
-        pages += scanSecretChats(scope, minDate, targetCount) { onProgress(all.size, pages + it) }
+        val secretPages = scanSecretChats(minDate, targetCount) {
+            onProgress(all.size, pages + it)
+        }
+        pages += secretPages
         onProgress(all.size, pages)
 
         val values = all.values.sortedWith(
@@ -78,7 +78,6 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
     }
 
     private fun scanSecretChats(
-        scope: HistoryScope,
         minDate: Int,
         targetCount: Int?,
         onPage: (pages: Int) -> Unit
@@ -87,12 +86,11 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
         val secretChatIds = linkedSetOf<Long>()
 
         listOf<TdApi.ChatList>(TdApi.ChatListMain(), TdApi.ChatListArchive()).forEach { list ->
-            // Load until TDLib returns 404 (all chats in that list loaded).
-            repeat(MAX_CHAT_LOAD_ROUNDS) {
+            for (round in 0 until MAX_CHAT_LOAD_ROUNDS) {
                 val loaded = runCatching {
                     engine.sendBlocking(TdApi.LoadChats(list, 100), timeoutSeconds = 60)
                 }.isSuccess
-                if (!loaded) return@repeat
+                if (!loaded) break
             }
 
             val ids = runCatching {
