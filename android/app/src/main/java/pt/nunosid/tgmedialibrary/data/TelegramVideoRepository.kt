@@ -56,6 +56,7 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
                     runCatching { engine.sendBlocking(TdApi.GetChat(message.chatId)).title }
                         .getOrDefault("Conversa ${message.chatId}")
                 }
+                val thumbnailFile = video.thumbnail?.file
                 all[message.chatId to message.id] = VideoItem(
                     messageId = message.id,
                     chatId = message.chatId,
@@ -70,7 +71,8 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
                     mimeType = video.mimeType.orEmpty().ifBlank { "video/mp4" },
                     caption = content.caption?.text.orEmpty(),
                     supportsStreaming = video.supportsStreaming,
-                    miniThumbnail = video.minithumbnail?.data
+                    thumbnailFileId = thumbnailFile?.id,
+                    thumbnailLocalPath = thumbnailFile?.local?.path?.takeIf { it.isNotBlank() }
                 )
             }
 
