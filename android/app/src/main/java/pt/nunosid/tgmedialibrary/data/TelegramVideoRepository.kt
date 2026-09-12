@@ -20,83 +20,222 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
         onProgress: (loaded: Int, pages: Int) -> Unit = { _, _ -> }
     ): List<VideoItem> = withContext(Dispatchers.IO) {
         all.clear()
-        var nextOffset = ""
         var pages = 0
-        val seenOffsets = HashSet<String>()
         val targetCount = scope.targetCount()
         val minDate = scope.minDateUnix()
 
-        while (true) {
-            if (!seenOffsets.add(nextOffset)) break
+        // Cloud/global search does not include secret chats. Scan each relevant media class.
+        val globalFilters: List<TdApi.SearchMessagesFilter> = listOf(
+            TdApi.SearchMessagesFilterVideo(),
+            TdApi.SearchMessagesFilterAnimation(),
+            TdApi.SearchMessagesFilterDocument(),
+            TdApi.SearchMessagesFilterVideoNote()
+        )
 
-            val request = TdApi.SearchMessages().apply {
-                chatList = null
-                query = ""
-                offset = nextOffset
-                limit = 100
-                filter = TdApi.SearchMessagesFilterVideo()
-                chatTypeFilter = null
-                this.minDate = minDate
-                maxDate = 0
+        for (filter in globalFilters) {
+            var nextOffset = ""
+            val seenOffsets = HashSet<String>()
+            var matchedForFilter = 0
+
+            while (seenOffsets.add(nextOffset)) {
+                val request = TdApi.SearchMessages().apply {
+                    chatList = null
+                    query = ""
+                    offset = nextOffset
+                    limit = 100
+                    this.filter = filter
+                    chatTypeFilter = null
+                    this.minDate = minDate
+                    maxDate = 0
+                }
+
+                val found = engine.sendBlocking(request, timeoutSeconds = 60)
+                pages += 1
+                found.messages.orEmpty().forEach { message ->
+                    val item = message.toVideoItem() ?: return@forEach
+                    if (all.put(message.chatId to message.id, item) == null) matchedForFilter += 1
+                }
+                onProgress(all.size, pages)
+
+                if (targetCount != null && matchedForFilter >= targetCount) break
+                val newOffset = found.nextOffset
+                if (newOffset.isBlank()) break
+                nextOffset = newOffset
+            }
+        }
+
+        // searchMessages explicitly excludes secret chats. TDLib supports them only locally on
+        // the device where they exist, so enumerate those chats and page their history directly.
+        pages += scanSecretChats(scope, minDate, targetCount) { onProgress(all.size, pages + it) }
+        onProgress(all.size, pages)
+
+        val values = all.values.sortedWith(
+            compareByDescending<VideoItem> { it.dateUnix }
+                .thenByDescending { it.chatId }
+                .thenByDescending { it.messageId }
+        )
+        if (targetCount == null) values else values.take(targetCount)
+    }
+
+    private fun scanSecretChats(
+        scope: HistoryScope,
+        minDate: Int,
+        targetCount: Int?,
+        onPage: (pages: Int) -> Unit
+    ): Int {
+        var pageCount = 0
+        val secretChatIds = linkedSetOf<Long>()
+
+        listOf<TdApi.ChatList>(TdApi.ChatListMain(), TdApi.ChatListArchive()).forEach { list ->
+            // Load until TDLib returns 404 (all chats in that list loaded).
+            repeat(MAX_CHAT_LOAD_ROUNDS) {
+                val loaded = runCatching {
+                    engine.sendBlocking(TdApi.LoadChats(list, 100), timeoutSeconds = 60)
+                }.isSuccess
+                if (!loaded) return@repeat
             }
 
-            val found = engine.sendBlocking(request, timeoutSeconds = 60)
-            pages += 1
+            val ids = runCatching {
+                engine.sendBlocking(TdApi.GetChats(list, 10_000), timeoutSeconds = 60).chatIds
+            }.getOrDefault(LongArray(0))
 
-            found.messages.orEmpty().forEach { message ->
-                val content = message.content as? TdApi.MessageVideo ?: return@forEach
-                if (content.isSecret) return@forEach
-                val video = content.video
-                val file = video.video
-                val size = when {
-                    file.expectedSize > 0 -> file.expectedSize
-                    file.size > 0 -> file.size
-                    else -> 0L
+            ids.forEach { chatId ->
+                val chat = runCatching { engine.sendBlocking(TdApi.GetChat(chatId), timeoutSeconds = 30) }.getOrNull()
+                if (chat?.type is TdApi.ChatTypeSecret) secretChatIds += chatId
+            }
+        }
+
+        secretChatIds.forEach { chatId ->
+            var fromMessageId = 0L
+            var matched = 0
+            val seenMessageIds = HashSet<Long>()
+
+            while (true) {
+                val history = runCatching {
+                    engine.sendBlocking(
+                        TdApi.GetChatHistory(chatId, fromMessageId, 0, 100, false),
+                        timeoutSeconds = 60
+                    )
+                }.getOrNull() ?: break
+
+                pageCount += 1
+                onPage(pageCount)
+                val messages = history.messages.orEmpty()
+                if (messages.isEmpty()) break
+
+                var oldestDate = Int.MAX_VALUE
+                var nextFrom = 0L
+                messages.forEach { message ->
+                    if (!seenMessageIds.add(message.id)) return@forEach
+                    oldestDate = minOf(oldestDate, message.date)
+                    nextFrom = message.id
+                    val item = message.toVideoItem() ?: return@forEach
+                    if (all.put(message.chatId to message.id, item) == null) matched += 1
                 }
-                val chatTitle = chatNames.getOrPut(message.chatId) {
-                    runCatching { engine.sendBlocking(TdApi.GetChat(message.chatId)).title }
-                        .getOrDefault("Conversa ${message.chatId}")
-                }
 
-                val thumbnailFile = video.thumbnail?.file
-                val existingThumbnailPath = thumbnailFile?.local?.path?.takeIf { it.isNotBlank() }
+                if (targetCount != null && matched >= targetCount) break
+                if (minDate > 0 && oldestDate < minDate) break
+                if (nextFrom == 0L || nextFrom == fromMessageId) break
+                fromMessageId = nextFrom
+            }
+        }
 
-                // Purge thumbnail files left by older versions or a previous TDLib cache.
-                // The UI will fetch them again only when needed, decode to RAM, then delete immediately.
-                if (thumbnailFile != null && existingThumbnailPath != null) {
-                    runCatching { File(existingThumbnailPath).delete() }
-                    engine.deleteLocalFileAsync(thumbnailFile.id)
-                }
+        return pageCount
+    }
 
-                all[message.chatId to message.id] = VideoItem(
-                    messageId = message.id,
-                    chatId = message.chatId,
-                    chatTitle = chatTitle,
-                    dateUnix = message.date,
-                    fileId = file.id,
-                    fileSize = size,
-                    durationSeconds = video.duration,
-                    width = video.width,
-                    height = video.height,
-                    fileName = video.fileName.orEmpty(),
-                    mimeType = video.mimeType.orEmpty().ifBlank { "video/mp4" },
-                    caption = content.caption?.text.orEmpty(),
-                    supportsStreaming = video.supportsStreaming,
-                    thumbnailFileId = thumbnailFile?.id,
-                    thumbnailLocalPath = null
+    private fun TdApi.Message.toVideoItem(): VideoItem? {
+        val descriptor = when (val c = content) {
+            is TdApi.MessageVideo -> MediaDescriptor(
+                file = c.video.video,
+                fileName = c.video.fileName.orEmpty(),
+                mimeType = c.video.mimeType.orEmpty().ifBlank { "video/mp4" },
+                duration = c.video.duration,
+                width = c.video.width,
+                height = c.video.height,
+                caption = c.caption?.text.orEmpty(),
+                supportsStreaming = c.video.supportsStreaming,
+                thumbnail = c.video.thumbnail?.file
+            )
+
+            is TdApi.MessageAnimation -> MediaDescriptor(
+                file = c.animation.animation,
+                fileName = c.animation.fileName.orEmpty(),
+                mimeType = c.animation.mimeType.orEmpty().ifBlank { "video/mp4" },
+                duration = c.animation.duration,
+                width = c.animation.width,
+                height = c.animation.height,
+                caption = c.caption?.text.orEmpty(),
+                supportsStreaming = true,
+                thumbnail = c.animation.thumbnail?.file
+            )
+
+            is TdApi.MessageVideoNote -> MediaDescriptor(
+                file = c.videoNote.video,
+                fileName = "video_note_${chatId}_${id}.mp4",
+                mimeType = "video/mp4",
+                duration = c.videoNote.duration,
+                width = c.videoNote.length,
+                height = c.videoNote.length,
+                caption = "",
+                supportsStreaming = true,
+                thumbnail = c.videoNote.thumbnail?.file
+            )
+
+            is TdApi.MessageDocument -> {
+                val document = c.document
+                if (!document.mimeType.orEmpty().startsWith("video/", ignoreCase = true)) return null
+                MediaDescriptor(
+                    file = document.document,
+                    fileName = document.fileName.orEmpty(),
+                    mimeType = document.mimeType.orEmpty().ifBlank { "video/mp4" },
+                    duration = 0,
+                    width = 0,
+                    height = 0,
+                    caption = c.caption?.text.orEmpty(),
+                    supportsStreaming = false,
+                    thumbnail = document.thumbnail?.file
                 )
             }
 
-            onProgress(all.size, pages)
-
-            if (targetCount != null && all.size >= targetCount) break
-            val newOffset = found.nextOffset
-            if (newOffset.isBlank()) break
-            nextOffset = newOffset
+            else -> return null
         }
 
-        val values = all.values.toList()
-        if (targetCount == null) values else values.take(targetCount)
+        val file = descriptor.file
+        val size = when {
+            file.expectedSize > 0 -> file.expectedSize
+            file.size > 0 -> file.size
+            else -> 0L
+        }
+        val chatTitle = chatNames.getOrPut(chatId) {
+            runCatching { engine.sendBlocking(TdApi.GetChat(chatId)).title }
+                .getOrDefault("Conversa $chatId")
+        }
+
+        purgeLegacyThumbnail(descriptor.thumbnail)
+
+        return VideoItem(
+            messageId = id,
+            chatId = chatId,
+            chatTitle = chatTitle,
+            dateUnix = date,
+            fileId = file.id,
+            fileSize = size,
+            durationSeconds = descriptor.duration,
+            width = descriptor.width,
+            height = descriptor.height,
+            fileName = descriptor.fileName,
+            mimeType = descriptor.mimeType,
+            caption = descriptor.caption,
+            supportsStreaming = descriptor.supportsStreaming,
+            thumbnailFileId = descriptor.thumbnail?.id,
+            thumbnailLocalPath = null
+        )
+    }
+
+    private fun purgeLegacyThumbnail(thumbnail: TdApi.File?) {
+        val path = thumbnail?.local?.path?.takeIf { it.isNotBlank() } ?: return
+        runCatching { File(path).delete() }
+        engine.deleteLocalFileAsync(thumbnail.id)
     }
 
     fun applyFilters(source: List<VideoItem>, filters: VideoFilters): List<VideoItem> {
@@ -136,5 +275,21 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
             else -> return 0
         }
         return (now - seconds).coerceAtLeast(0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+    }
+
+    private data class MediaDescriptor(
+        val file: TdApi.File,
+        val fileName: String,
+        val mimeType: String,
+        val duration: Int,
+        val width: Int,
+        val height: Int,
+        val caption: String,
+        val supportsStreaming: Boolean,
+        val thumbnail: TdApi.File?
+    )
+
+    companion object {
+        private const val MAX_CHAT_LOAD_ROUNDS = 200
     }
 }
