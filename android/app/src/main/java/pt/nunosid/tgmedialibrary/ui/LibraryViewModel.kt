@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import pt.nunosid.tgmedialibrary.data.TelegramVideoRepository
+import pt.nunosid.tgmedialibrary.model.HistoryScope
 import pt.nunosid.tgmedialibrary.model.VideoFilters
 import pt.nunosid.tgmedialibrary.model.VideoItem
 import pt.nunosid.tgmedialibrary.telegram.TelegramAuthState
@@ -21,11 +22,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     val authState = engine.authState
     val connectionLabel = engine.connectionLabel
 
+    private val _privacyUnlocked = MutableStateFlow(false)
+    val privacyUnlocked: StateFlow<Boolean> = _privacyUnlocked.asStateFlow()
+
     private val _videos = MutableStateFlow<List<VideoItem>>(emptyList())
     private val _filters = MutableStateFlow(VideoFilters())
     val filters: StateFlow<VideoFilters> = _filters.asStateFlow()
+    private val _historyScope = MutableStateFlow(HistoryScope.LAST_500)
+    val historyScope: StateFlow<HistoryScope> = _historyScope.asStateFlow()
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
+    private val _loadedCount = MutableStateFlow(0)
+    val loadedCount: StateFlow<Int> = _loadedCount.asStateFlow()
+    private val _indexedPages = MutableStateFlow(0)
+    val indexedPages: StateFlow<Int> = _indexedPages.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
@@ -36,9 +46,30 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     init {
         viewModelScope.launch {
             authState.collect { state ->
-                if (state is TelegramAuthState.Ready && _videos.value.isEmpty()) refresh()
+                if (state is TelegramAuthState.Ready && _videos.value.isEmpty() && !_loading.value) {
+                    loadHistory(_historyScope.value)
+                }
             }
         }
+    }
+
+    fun tryUnlock(code: String): Boolean {
+        val ok = code == ENTRY_CODE
+        if (ok) _privacyUnlocked.value = true
+        return ok
+    }
+
+    fun lockPrivacy() {
+        _privacyUnlocked.value = false
+    }
+
+    fun panicWipe() {
+        _privacyUnlocked.value = false
+        _videos.value = emptyList()
+        _filters.value = VideoFilters()
+        _loadedCount.value = 0
+        _indexedPages.value = 0
+        engine.panicWipeLocal()
     }
 
     fun configureApi(apiId: String, apiHash: String) = engine.configureApi(apiId, apiHash)
@@ -51,20 +82,30 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _filters.value = transform(_filters.value)
     }
 
-    fun refresh() = viewModelScope.launch {
-        _loading.value = true
-        _error.value = null
-        runCatching { repository.resetAndLoad() }
-            .onSuccess { _videos.value = it }
-            .onFailure { _error.value = it.message }
-        _loading.value = false
+    fun selectHistoryScope(scope: HistoryScope) {
+        _historyScope.value = scope
+        loadHistory(scope)
     }
 
-    fun loadMore() = viewModelScope.launch {
+    fun refresh() = loadHistory(_historyScope.value)
+
+    private fun loadHistory(scope: HistoryScope) = viewModelScope.launch {
         if (_loading.value) return@launch
         _loading.value = true
-        runCatching { repository.loadNext() }
-            .onSuccess { _videos.value = it }
+        _error.value = null
+        _loadedCount.value = 0
+        _indexedPages.value = 0
+        _videos.value = emptyList()
+        runCatching {
+            repository.loadScope(scope) { loaded, pages ->
+                _loadedCount.value = loaded
+                _indexedPages.value = pages
+            }
+        }
+            .onSuccess {
+                _videos.value = it
+                _loadedCount.value = it.size
+            }
             .onFailure { _error.value = it.message }
         _loading.value = false
     }
@@ -72,5 +113,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     override fun onCleared() {
         engine.close()
         super.onCleared()
+    }
+
+    companion object {
+        private const val ENTRY_CODE = "21031991"
+        const val PANIC_CODE = "112"
     }
 }
