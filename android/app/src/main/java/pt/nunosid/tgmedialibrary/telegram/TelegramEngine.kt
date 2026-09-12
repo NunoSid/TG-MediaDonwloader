@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
+import pt.nunosid.tgmedialibrary.security.SecureStore
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -23,7 +24,11 @@ sealed interface TelegramAuthState {
 }
 
 class TelegramEngine(private val context: Context) {
-    private val prefs = context.getSharedPreferences("telegram_api", Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val legacyPrefs = appContext.getSharedPreferences("telegram_api", Context.MODE_PRIVATE)
+    private val securityPrefs = appContext.getSharedPreferences("security_state", Context.MODE_PRIVATE)
+    private val secureStore = SecureStore(appContext)
+
     private val _authState = MutableStateFlow<TelegramAuthState>(TelegramAuthState.Starting)
     val authState: StateFlow<TelegramAuthState> = _authState.asStateFlow()
     private val _connectionLabel = MutableStateFlow("A iniciar")
@@ -35,10 +40,28 @@ class TelegramEngine(private val context: Context) {
     private var apiHash = ""
 
     init {
-        val savedId = prefs.getInt("api_id", 0)
-        val savedHash = prefs.getString("api_hash", "").orEmpty()
+        migrateToEncryptedStorageOnce()
+        val savedId = secureStore.getString(KEY_API_ID)?.toIntOrNull() ?: 0
+        val savedHash = secureStore.getString(KEY_API_HASH).orEmpty()
         if (savedId > 0 && savedHash.isNotBlank()) configureApi(savedId.toString(), savedHash, persist = false)
         else _authState.value = TelegramAuthState.NeedApiCredentials
+    }
+
+    private fun migrateToEncryptedStorageOnce() {
+        if (securityPrefs.getBoolean(MIGRATION_FLAG, false)) return
+
+        // Preserve API credentials, but intentionally rebuild the old unencrypted TDLib database.
+        val oldId = legacyPrefs.getInt("api_id", 0)
+        val oldHash = legacyPrefs.getString("api_hash", "").orEmpty()
+        if (oldId > 0 && oldHash.isNotBlank()) {
+            secureStore.putString(KEY_API_ID, oldId.toString())
+            secureStore.putString(KEY_API_HASH, oldHash)
+        }
+        legacyPrefs.edit().clear().commit()
+
+        runCatching { File(appContext.filesDir, "tdlib").deleteRecursively() }
+        purgeFilesystemCaches()
+        securityPrefs.edit().putBoolean(MIGRATION_FLAG, true).commit()
     }
 
     fun configureApi(idText: String, hash: String, persist: Boolean = true) {
@@ -49,15 +72,21 @@ class TelegramEngine(private val context: Context) {
         }
         apiId = parsedId
         apiHash = hash.trim()
-        if (persist) prefs.edit().putInt("api_id", apiId).putString("api_hash", apiHash).apply()
+        if (persist) {
+            secureStore.putString(KEY_API_ID, apiId.toString())
+            secureStore.putString(KEY_API_HASH, apiHash)
+            legacyPrefs.edit().clear().apply()
+        }
         startClient()
     }
 
     fun resetApiCredentials() {
-        purgeTransientFilesAsync()
+        purgePrivacyCaches()
         runCatching { client?.send(TdApi.Close()) { } }
         client = null
-        prefs.edit().clear().apply()
+        secureStore.putString(KEY_API_ID, "")
+        secureStore.putString(KEY_API_HASH, "")
+        legacyPrefs.edit().clear().apply()
         apiId = 0
         apiHash = ""
         _connectionLabel.value = "A iniciar"
@@ -74,12 +103,14 @@ class TelegramEngine(private val context: Context) {
         }
         client = null
         transientFileIds.clear()
-        prefs.edit().clear().commit()
+        legacyPrefs.edit().clear().commit()
+        secureStore.destroy()
+        securityPrefs.edit().clear().commit()
         apiId = 0
         apiHash = ""
 
-        runCatching { File(context.filesDir, "tdlib").deleteRecursively() }
-        runCatching { context.cacheDir.listFiles()?.forEach { it.deleteRecursively() } }
+        runCatching { File(appContext.filesDir, "tdlib").deleteRecursively() }
+        purgeFilesystemCaches()
 
         _connectionLabel.value = "Dados locais apagados"
         _authState.value = TelegramAuthState.NeedApiCredentials
@@ -117,14 +148,16 @@ class TelegramEngine(private val context: Context) {
     private fun handleAuthorizationState(state: TdApi.AuthorizationState) {
         when (state) {
             is TdApi.AuthorizationStateWaitTdlibParameters -> {
-                val base = File(context.filesDir, "tdlib").apply { mkdirs() }
+                val base = File(appContext.filesDir, "tdlib").apply { mkdirs() }
                 val media = File(base, "files").apply { mkdirs() }
                 val version = runCatching {
-                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                }.getOrNull() ?: "0.1.0"
+                    appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
+                }.getOrNull() ?: "0.7.0"
+                val databaseKey = secureStore.getOrCreateRandomBytes(KEY_DATABASE_KEY, 32)
+
                 send(TdApi.SetTdlibParameters(
-                    false, base.absolutePath, media.absolutePath, ByteArray(0),
-                    true, true, true, false,
+                    false, base.absolutePath, media.absolutePath, databaseKey,
+                    true, true, true, true,
                     apiId, apiHash, "pt", android.os.Build.MODEL,
                     android.os.Build.VERSION.RELEASE, version
                 ))
@@ -143,6 +176,7 @@ class TelegramEngine(private val context: Context) {
     fun submitPassword(password: String) = send(TdApi.CheckAuthenticationPassword(password))
 
     fun downloadFilePath(fileId: Int, priority: Int = 16, timeoutSeconds: Long = 1800): String {
+        markTransientFile(fileId)
         val result = sendBlocking(
             TdApi.DownloadFile(fileId, priority, 0, 0, true),
             timeoutSeconds = timeoutSeconds
@@ -179,6 +213,20 @@ class TelegramEngine(private val context: Context) {
         }
     }
 
+    fun purgePrivacyCaches() {
+        purgeTransientFilesAsync()
+        purgeFilesystemCaches()
+    }
+
+    private fun purgeFilesystemCaches() {
+        runCatching { File(appContext.cacheDir, "telegram-share").deleteRecursively() }
+        runCatching {
+            appContext.cacheDir.listFiles()
+                ?.filter { it.name.startsWith("tg-stream-") || it.name.startsWith("telegram-media-") }
+                ?.forEach { it.deleteRecursively() }
+        }
+    }
+
     fun deleteLocalFile(fileId: Int) {
         transientFileIds.remove(fileId)
         runCatching { sendBlocking(TdApi.DeleteFile(fileId), timeoutSeconds = 30) }
@@ -187,9 +235,7 @@ class TelegramEngine(private val context: Context) {
     fun deleteLocalFileAsync(fileId: Int) {
         transientFileIds.remove(fileId)
         val active = client ?: return
-        runCatching {
-            active.send(TdApi.DeleteFile(fileId)) { /* best-effort cache purge */ }
-        }
+        runCatching { active.send(TdApi.DeleteFile(fileId)) { } }
     }
 
     fun <T : TdApi.Object> send(function: TdApi.Function<T>, onResult: ((T) -> Unit)? = null) {
@@ -216,8 +262,15 @@ class TelegramEngine(private val context: Context) {
     }
 
     fun close() {
-        purgeTransientFilesAsync()
+        purgePrivacyCaches()
         runCatching { client?.send(TdApi.Close()) { } }
         client = null
+    }
+
+    companion object {
+        private const val MIGRATION_FLAG = "hardening_v1"
+        private const val KEY_API_ID = "telegram_api_id"
+        private const val KEY_API_HASH = "telegram_api_hash"
+        private const val KEY_DATABASE_KEY = "tdlib_database_key"
     }
 }
