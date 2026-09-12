@@ -41,6 +41,8 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun configureApi(apiId: String, apiHash: String) = engine.configureApi(apiId, apiHash)
+    fun resetApiCredentials() = engine.resetApiCredentials()
     fun submitPhone(value: String) = engine.submitPhone(value)
     fun submitCode(value: String) = engine.submitCode(value)
     fun submitPassword(value: String) = engine.submitPassword(value)
