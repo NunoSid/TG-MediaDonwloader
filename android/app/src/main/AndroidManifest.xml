@@ -4,7 +4,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="Telegram Media Library"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="Calculator"
         android:supportsRtl="true"
         android:theme="@style/Theme.TelegramMediaLibrary">
 
