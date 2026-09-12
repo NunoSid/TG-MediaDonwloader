@@ -76,7 +76,6 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _privacyUnlocked.value = false
     }
 
-    /** Called after returning from an external share target. */
     fun purgeExternalShareCache() {
         engine.purgePrivacyCaches()
     }
@@ -86,8 +85,10 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _privacyUnlocked.value = false
         _videos.value = emptyList()
         _filters.value = VideoFilters()
+        _filterPresets.value = emptyList()
         _loadedCount.value = 0
         _indexedPages.value = 0
+        presetPrefs.edit().clear().commit()
         engine.panicWipeLocal()
     }
 
