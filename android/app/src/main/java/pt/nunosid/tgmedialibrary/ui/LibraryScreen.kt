@@ -14,10 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
+import pt.nunosid.tgmedialibrary.data.TelegramMediaActions
 import pt.nunosid.tgmedialibrary.model.HistoryScope
 import pt.nunosid.tgmedialibrary.model.VideoItem
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayAcid
@@ -31,6 +34,9 @@ import pt.nunosid.tgmedialibrary.ui.theme.ReplayPink
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
+    val context = LocalContext.current
+    val scopeCoroutine = rememberCoroutineScope()
+    val mediaActions = remember(viewModel.engine) { TelegramMediaActions(context.applicationContext, viewModel.engine) }
     val items by viewModel.visibleVideos.collectAsState(initial = emptyList())
     val catalog by viewModel.videos.collectAsState()
     val filters by viewModel.filters.collectAsState()
@@ -42,6 +48,20 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
     val error by viewModel.error.collectAsState()
     var filtersOpen by remember { mutableStateOf(false) }
     var historyMenu by remember { mutableStateOf(false) }
+    var selectionMode by remember { mutableStateOf(false) }
+    val selected = remember { mutableStateMapOf<String, VideoItem>() }
+    var transferBusy by remember { mutableStateOf(false) }
+    var transferStatus by remember { mutableStateOf<String?>(null) }
+
+    fun toggleSelection(video: VideoItem) {
+        val key = videoKey(video)
+        if (selected.containsKey(key)) selected.remove(key) else selected[key] = video
+    }
+
+    fun finishSelection() {
+        selected.clear()
+        selectionMode = false
+    }
 
     Scaffold(
         containerColor = ReplayPaper,
@@ -63,7 +83,7 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                                 style = MaterialTheme.typography.titleLarge
                             )
                             Text(
-                                "TELEGRAM MEDIA REPLAY",
+                                if (selectionMode) "${selected.size} SELECTED" else "TELEGRAM MEDIA REPLAY",
                                 color = ReplayMuted,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = 1.4.sp,
@@ -73,12 +93,16 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                         Box(
                             Modifier
                                 .padding(end = 12.dp)
-                                .background(if (loading) ReplayPink else ReplayAcid)
+                                .background(if (loading || transferBusy) ReplayPink else ReplayAcid)
                                 .border(2.dp, ReplayInk)
                                 .padding(horizontal = 8.dp, vertical = 5.dp)
                         ) {
                             Text(
-                                if (loading) "INDEXING" else "READY",
+                                when {
+                                    transferBusy -> "TRANSFER"
+                                    loading -> "INDEXING"
+                                    else -> "READY"
+                                },
                                 fontWeight = FontWeight.Black,
                                 letterSpacing = 1.sp,
                                 style = MaterialTheme.typography.labelSmall
@@ -112,6 +136,7 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                     modifier = Modifier.weight(1f),
                     placeholder = { Text("PESQUISAR VÍDEOS / CONVERSAS") },
                     singleLine = true,
+                    enabled = !selectionMode && !transferBusy,
                     shape = RectangleShape,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedContainerColor = ReplayCyan,
@@ -122,49 +147,128 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                     )
                 )
                 ReplayButton(
-                    text = "FILTROS",
-                    background = ReplayAcid,
-                    onClick = { filtersOpen = true }
+                    text = if (selectionMode) "CANCEL" else "FILTROS",
+                    background = if (selectionMode) ReplayPink else ReplayAcid,
+                    enabled = !transferBusy,
+                    onClick = {
+                        if (selectionMode) finishSelection() else filtersOpen = true
+                    }
                 )
             }
 
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(Modifier.weight(1f)) {
-                    ReplayButton(
-                        text = scope.shortLabel(),
-                        background = ReplayPanel,
-                        enabled = !loading,
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { historyMenu = true }
-                    )
-                    DropdownMenu(
-                        expanded = historyMenu,
-                        onDismissRequest = { historyMenu = false },
-                        modifier = Modifier.background(ReplayPanel).border(2.dp, ReplayInk)
+            if (selectionMode) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        Modifier
+                            .weight(.7f)
+                            .height(48.dp)
+                            .background(ReplayPanel)
+                            .border(2.dp, ReplayInk),
+                        contentAlignment = Alignment.Center
                     ) {
-                        HistoryScope.entries.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        option.label().uppercase(),
-                                        fontWeight = FontWeight.Bold,
-                                        style = MaterialTheme.typography.labelMedium
-                                    )
-                                },
-                                onClick = {
-                                    historyMenu = false
-                                    viewModel.selectHistoryScope(option)
-                                }
-                            )
+                        Text("${selected.size} SEL.", fontWeight = FontWeight.Black)
+                    }
+                    ReplayButton(
+                        "DOWNLOAD",
+                        ReplayCyan,
+                        enabled = selected.isNotEmpty() && !transferBusy,
+                        modifier = Modifier.weight(1.2f),
+                        onClick = {
+                            val batch = selected.values.toList()
+                            scopeCoroutine.launch {
+                                transferBusy = true
+                                transferStatus = "A DESCARREGAR ${batch.size} VÍDEO(S)…"
+                                runCatching { mediaActions.downloadToDevice(batch) }
+                                    .onSuccess {
+                                        transferStatus = "${batch.size} VÍDEO(S) GUARDADO(S) EM DOWNLOADS / TELEGRAM MEDIA LIBRARY"
+                                        finishSelection()
+                                    }
+                                    .onFailure { transferStatus = "ERRO: ${it.message}" }
+                                transferBusy = false
+                            }
+                        }
+                    )
+                    ReplayButton(
+                        "TELEGRAM",
+                        ReplayPink,
+                        enabled = selected.isNotEmpty() && !transferBusy,
+                        modifier = Modifier.weight(1.1f),
+                        onClick = {
+                            val batch = selected.values.toList()
+                            scopeCoroutine.launch {
+                                transferBusy = true
+                                transferStatus = "A PREPARAR ${batch.size} VÍDEO(S) PARA TELEGRAM…"
+                                runCatching { mediaActions.prepareShare(batch) }
+                                    .onSuccess {
+                                        transferStatus = null
+                                        finishSelection()
+                                        mediaActions.shareViaTelegram(it)
+                                    }
+                                    .onFailure { transferStatus = "ERRO: ${it.message}" }
+                                transferBusy = false
+                            }
+                        }
+                    )
+                }
+            } else {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(Modifier.weight(1f)) {
+                        ReplayButton(
+                            text = scope.shortLabel(),
+                            background = ReplayPanel,
+                            enabled = !loading && !transferBusy,
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { historyMenu = true }
+                        )
+                        DropdownMenu(
+                            expanded = historyMenu,
+                            onDismissRequest = { historyMenu = false },
+                            modifier = Modifier.background(ReplayPanel).border(2.dp, ReplayInk)
+                        ) {
+                            HistoryScope.entries.forEach { option ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            option.label().uppercase(),
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelMedium
+                                        )
+                                    },
+                                    onClick = {
+                                        historyMenu = false
+                                        viewModel.selectHistoryScope(option)
+                                    }
+                                )
+                            }
                         }
                     }
+                    ReplayButton("↻", ReplayCyan, viewModel::refresh, enabled = !loading && !transferBusy)
+                    ReplayButton("SELECT", ReplayAcid, { selectionMode = true }, enabled = !loading && !transferBusy)
+                    ReplayButton("LOCK", ReplayPink, viewModel::lockPrivacy, enabled = !transferBusy)
                 }
-                ReplayButton("↻", ReplayCyan, viewModel::refresh, enabled = !loading)
-                ReplayButton("LOCK", ReplayPink, viewModel::lockPrivacy)
+            }
+
+            transferStatus?.let {
+                Text(
+                    it,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 7.dp)
+                        .background(ReplayPanel)
+                        .border(2.dp, ReplayInk)
+                        .padding(8.dp),
+                    color = ReplayMuted,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
 
             if (loading) {
@@ -232,8 +336,15 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(items, key = { "${it.chatId}:${it.messageId}" }) {
-                        VideoCard(it, onPlay)
+                    items(items, key = { "${it.chatId}:${it.messageId}" }) { video ->
+                        VideoCard(
+                            item = video,
+                            engine = viewModel.engine,
+                            selectionMode = selectionMode,
+                            selected = selected.containsKey(videoKey(video)),
+                            onPlay = onPlay,
+                            onToggleSelection = ::toggleSelection
+                        )
                     }
                 }
             }
@@ -245,6 +356,8 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
         filtersOpen = false
     }
 }
+
+private fun videoKey(video: VideoItem) = "${video.chatId}:${video.messageId}"
 
 @Composable
 private fun StatusStrip(visible: Int, indexed: Int, connection: String) {
@@ -308,9 +421,9 @@ private fun ReplayButton(
             disabledContainerColor = background.copy(alpha = 0.45f),
             disabledContentColor = ReplayInk.copy(alpha = 0.45f)
         ),
-        contentPadding = PaddingValues(horizontal = 11.dp)
+        contentPadding = PaddingValues(horizontal = 10.dp)
     ) {
-        Text(text, fontWeight = FontWeight.Black, letterSpacing = 0.5.sp, maxLines = 1)
+        Text(text, fontWeight = FontWeight.Black, letterSpacing = 0.4.sp, maxLines = 1)
     }
 }
 
