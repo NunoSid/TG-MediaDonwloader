@@ -3,14 +3,17 @@ package pt.nunosid.tgmedialibrary.ui
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import pt.nunosid.tgmedialibrary.model.FilterPreset
@@ -34,22 +37,39 @@ fun FilterDialog(
     onSavePreset: (String, VideoFilters) -> Unit,
     onDeletePreset: (String) -> Unit
 ) {
+    val chats = remember(videos) { videos.distinctBy { it.chatId }.sortedBy { it.chatTitle.lowercase() } }
+    val allChatIds = remember(chats) { chats.mapTo(linkedSetOf()) { it.chatId } }
+    val chatCounts = remember(videos) { videos.groupingBy { it.chatId }.eachCount() }
+
     var minMb by remember(current) { mutableStateOf(current.minBytes?.div(MB)?.toString().orEmpty()) }
     var maxMb by remember(current) { mutableStateOf(current.maxBytes?.div(MB)?.toString().orEmpty()) }
     var minMinutes by remember(current) { mutableStateOf(current.minDuration?.div(60)?.toString().orEmpty()) }
     var maxMinutes by remember(current) { mutableStateOf(current.maxDuration?.div(60)?.toString().orEmpty()) }
-    var selectedChat by remember(current) { mutableStateOf(current.chatId) }
+    var selectedChats by remember(current, allChatIds) {
+        mutableStateOf(if (current.chatIds.isEmpty()) allChatIds.toSet() else current.chatIds)
+    }
     var selectedSort by remember(current) { mutableStateOf(current.sort) }
-    var chatMenu by remember { mutableStateOf(false) }
+    var chatSearch by remember { mutableStateOf("") }
     var sortMenu by remember { mutableStateOf(false) }
     var presetMenu by remember { mutableStateOf(false) }
     var selectedPresetId by remember { mutableStateOf<String?>(null) }
     var presetName by remember { mutableStateOf("") }
-    val chats = videos.distinctBy { it.chatId }.sortedBy { it.chatTitle.lowercase() }
     val selectedPreset = presets.firstOrNull { it.id == selectedPresetId }
+    val visibleChats = remember(chats, chatSearch) {
+        val q = chatSearch.trim().lowercase()
+        if (q.isBlank()) chats else chats.filter { it.chatTitle.lowercase().contains(q) }
+    }
+
+    fun normalizedChatIds(): Set<Long> {
+        return if (
+            chats.isNotEmpty() &&
+            selectedChats.size == allChatIds.size &&
+            selectedChats.containsAll(allChatIds)
+        ) emptySet() else selectedChats
+    }
 
     fun draftFilters(): VideoFilters = current.copy(
-        chatId = selectedChat,
+        chatIds = normalizedChatIds(),
         minBytes = minMb.toLongOrNull()?.times(MB),
         maxBytes = maxMb.toLongOrNull()?.times(MB),
         minDuration = minMinutes.toIntOrNull()?.times(60),
@@ -62,8 +82,20 @@ fun FilterDialog(
         maxMb = filters.maxBytes?.div(MB)?.toString().orEmpty()
         minMinutes = filters.minDuration?.div(60)?.toString().orEmpty()
         maxMinutes = filters.maxDuration?.div(60)?.toString().orEmpty()
-        selectedChat = filters.chatId
+        selectedChats = if (filters.chatIds.isEmpty()) allChatIds.toSet() else filters.chatIds
         selectedSort = filters.sort
+        chatSearch = ""
+    }
+
+    fun toggleChat(chatId: Long) {
+        selectedChats = if (chatId in selectedChats) selectedChats - chatId else selectedChats + chatId
+    }
+
+    val chatSelectionLabel = when {
+        chats.isEmpty() -> "SEM CONVERSAS INDEXADAS"
+        normalizedChatIds().isEmpty() -> "TODAS AS CONVERSAS · ${chats.size}"
+        selectedChats.size == 1 -> chats.firstOrNull { it.chatId in selectedChats }?.chatTitle ?: "1 CONVERSA"
+        else -> "${selectedChats.size} CONVERSAS SELECIONADAS"
     }
 
     AlertDialog(
@@ -101,9 +133,10 @@ fun FilterDialog(
                         maxMb = ""
                         minMinutes = ""
                         maxMinutes = ""
-                        selectedChat = null
+                        selectedChats = allChatIds.toSet()
                         selectedSort = VideoSort.NEWEST
                         selectedPresetId = null
+                        chatSearch = ""
                     }
                 }
 
@@ -171,23 +204,87 @@ fun FilterDialog(
 
                 HorizontalDivider(color = ReplayInk.copy(alpha = .3f))
 
-                Box {
-                    ReplayFilterButton(
-                        chats.firstOrNull { it.chatId == selectedChat }?.chatTitle ?: "TODAS AS CONVERSAS",
-                        ReplayCyan,
-                        { chatMenu = true }
+                Text("GRUPOS / CANAIS / CHATS", fontWeight = FontWeight.Black, letterSpacing = .7.sp, style = MaterialTheme.typography.labelSmall)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(ReplayCyan)
+                        .border(2.dp, ReplayInk)
+                        .padding(horizontal = 10.dp, vertical = 9.dp)
+                ) {
+                    Text(chatSelectionLabel, fontWeight = FontWeight.Black, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+
+                OutlinedTextField(
+                    value = chatSearch,
+                    onValueChange = { chatSearch = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("PESQUISAR GRUPO / CANAL / CHAT") },
+                    singleLine = true,
+                    shape = RectangleShape,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = ReplayPanel,
+                        unfocusedContainerColor = ReplayPanel,
+                        focusedBorderColor = ReplayInk,
+                        unfocusedBorderColor = ReplayInk,
+                        cursorColor = ReplayInk
                     )
-                    DropdownMenu(
-                        expanded = chatMenu,
-                        onDismissRequest = { chatMenu = false },
-                        modifier = Modifier.background(ReplayPanel).border(2.dp, ReplayInk)
-                    ) {
-                        DropdownMenuItem(text = { Text("TODAS AS CONVERSAS", fontWeight = FontWeight.Bold) }, onClick = { selectedChat = null; chatMenu = false })
-                        chats.forEach { chat ->
-                            DropdownMenuItem(text = { Text(chat.chatTitle, fontWeight = FontWeight.SemiBold) }, onClick = { selectedChat = chat.chatId; chatMenu = false })
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    SmallPresetButton("TODAS", ReplayAcid, Modifier.weight(1f)) {
+                        selectedChats = allChatIds.toSet()
+                    }
+                    SmallPresetButton("MARCAR VISÍVEIS", ReplayCyan, Modifier.weight(1.45f)) {
+                        selectedChats = selectedChats + visibleChats.map { it.chatId }
+                    }
+                    SmallPresetButton("DESMARCAR VISÍVEIS", ReplayPink, Modifier.weight(1.65f)) {
+                        selectedChats = selectedChats - visibleChats.map { it.chatId }.toSet()
+                    }
+                }
+
+                if (visibleChats.isEmpty()) {
+                    Text("SEM RESULTADOS", color = ReplayMuted, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                } else {
+                    visibleChats.forEach { chat ->
+                        val checked = chat.chatId in selectedChats
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(if (checked) ReplayCyan else ReplayPanel)
+                                .border(2.dp, ReplayInk)
+                                .clickable { toggleChat(chat.chatId) }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = checked,
+                                onCheckedChange = null,
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = ReplayInk,
+                                    uncheckedColor = ReplayInk,
+                                    checkmarkColor = ReplayAcid
+                                )
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    chat.chatTitle,
+                                    fontWeight = FontWeight.Black,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Text(
+                                    "${chatCounts[chat.chatId] ?: 0} MEDIA",
+                                    color = ReplayMuted,
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.labelSmall
+                                )
+                            }
                         }
                     }
                 }
+
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     NumberField(minMb, { minMb = it }, "MIN. MB", Modifier.weight(1f))
                     NumberField(maxMb, { maxMb = it }, "MÁX. MB", Modifier.weight(1f))
