@@ -1,9 +1,13 @@
 package pt.nunosid.tgmedialibrary.ui
 
+import android.app.Activity
+import android.content.Context
+import android.media.AudioManager
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -12,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -35,10 +40,14 @@ import pt.nunosid.tgmedialibrary.ui.theme.ReplayMuted
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayPanel
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayPaper
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayPink
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 @Composable
 fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
     val context = LocalContext.current
+    val activity = context as? Activity
+    val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val scope = rememberCoroutineScope()
     val mediaActions = remember(engine) { TelegramMediaActions(context.applicationContext, engine) }
     val player = remember(video.fileId) {
@@ -60,11 +69,16 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
     var scrubbing by remember { mutableStateOf(false) }
     var scrubMs by remember { mutableFloatStateOf(0f) }
     var resumeAfterScrub by remember { mutableStateOf(false) }
-    var seekFeedback by remember { mutableStateOf<String?>(null) }
+    var overlayFeedback by remember { mutableStateOf<String?>(null) }
     var transferBusy by remember { mutableStateOf(false) }
     var transferStatus by remember { mutableStateOf<String?>(null) }
 
-    DisposableEffect(player) { onDispose { player.release() } }
+    DisposableEffect(player, video.fileId) {
+        onDispose {
+            player.release()
+            engine.purgeTransientFileAsync(video.fileId)
+        }
+    }
 
     LaunchedEffect(player) {
         while (true) {
@@ -79,10 +93,10 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
         }
     }
 
-    LaunchedEffect(seekFeedback) {
-        if (seekFeedback != null) {
-            delay(650)
-            seekFeedback = null
+    LaunchedEffect(overlayFeedback) {
+        if (overlayFeedback != null) {
+            delay(850)
+            overlayFeedback = null
         }
     }
 
@@ -92,7 +106,7 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
         player.seekTo(target)
         currentMs = target
         scrubMs = target.toFloat()
-        seekFeedback = if (deltaMs > 0) "+5s" else "−5s"
+        overlayFeedback = if (deltaMs > 0) "+5s" else "−5s"
     }
 
     Column(Modifier.fillMaxSize().background(ReplayPaper)) {
@@ -103,14 +117,116 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                 .background(Color.Black)
                 .border(2.dp, ReplayInk)
                 .pointerInput(player, durationMs) {
-                    detectTapGestures { offset ->
-                        when {
-                            offset.x < size.width * 0.42f -> seekBy(-5_000L)
-                            offset.x > size.width * 0.58f -> seekBy(5_000L)
-                            player.isPlaying -> player.pause()
-                            else -> player.play()
+                    detectTapGestures(
+                        onDoubleTap = { offset ->
+                            when {
+                                offset.x < size.width * 0.5f -> seekBy(-5_000L)
+                                else -> seekBy(5_000L)
+                            }
+                        },
+                        onTap = { offset ->
+                            when {
+                                offset.x < size.width * 0.32f -> seekBy(-5_000L)
+                                offset.x > size.width * 0.68f -> seekBy(5_000L)
+                                player.isPlaying -> player.pause()
+                                else -> player.play()
+                            }
+                        }
+                    )
+                }
+                .pointerInput(player, durationMs) {
+                    var startX = 0f
+                    var totalX = 0f
+                    var totalY = 0f
+                    var gestureMode = 0 // 1 horizontal seek, 2 brightness, 3 volume
+                    var startPosition = 0L
+                    var wasPlaying = false
+                    var startBrightness = 0.5f
+                    var startVolume = 0
+                    val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+
+                    fun finishHorizontalGesture() {
+                        if (gestureMode == 1) {
+                            val target = scrubMs.toLong().coerceAtLeast(0L)
+                            player.seekTo(target)
+                            currentMs = target
+                            scrubbing = false
+                            if (wasPlaying) {
+                                player.playWhenReady = true
+                                player.play()
+                            }
                         }
                     }
+
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            startX = offset.x
+                            totalX = 0f
+                            totalY = 0f
+                            gestureMode = 0
+                            startPosition = player.currentPosition.coerceAtLeast(0L)
+                            wasPlaying = player.isPlaying || player.playWhenReady
+                            val currentBrightness = activity?.window?.attributes?.screenBrightness ?: -1f
+                            startBrightness = if (currentBrightness in 0f..1f) currentBrightness else 0.5f
+                            startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                        },
+                        onDragEnd = {
+                            finishHorizontalGesture()
+                            gestureMode = 0
+                        },
+                        onDragCancel = {
+                            finishHorizontalGesture()
+                            gestureMode = 0
+                        },
+                        onDrag = { change, dragAmount ->
+                            totalX += dragAmount.x
+                            totalY += dragAmount.y
+
+                            if (gestureMode == 0 && (abs(totalX) > 12.dp.toPx() || abs(totalY) > 12.dp.toPx())) {
+                                gestureMode = if (abs(totalX) >= abs(totalY)) {
+                                    if (wasPlaying) player.pause()
+                                    resumeAfterScrub = wasPlaying
+                                    scrubbing = true
+                                    1
+                                } else if (startX < size.width / 2f) {
+                                    2
+                                } else {
+                                    3
+                                }
+                            }
+
+                            when (gestureMode) {
+                                1 -> {
+                                    val spanMs = 60_000f
+                                    val delta = if (size.width > 0) (totalX / size.width) * spanMs else 0f
+                                    val max = if (durationMs > 0) durationMs else Long.MAX_VALUE
+                                    val target = (startPosition + delta.toLong()).coerceIn(0L, max)
+                                    scrubMs = target.toFloat()
+                                    currentMs = target
+                                    overlayFeedback = "SEEK · ${timeLabel(target)}"
+                                }
+                                2 -> {
+                                    val delta = if (size.height > 0) -totalY / size.height else 0f
+                                    val brightness = (startBrightness + delta).coerceIn(0.05f, 1f)
+                                    activity?.window?.let { window ->
+                                        val attrs = window.attributes
+                                        attrs.screenBrightness = brightness
+                                        window.attributes = attrs
+                                    }
+                                    overlayFeedback = "BRILHO · ${(brightness * 100).roundToInt()}%"
+                                }
+                                3 -> {
+                                    val delta = if (size.height > 0) -totalY / size.height else 0f
+                                    val volume = (startVolume + delta * maxVolume)
+                                        .roundToInt()
+                                        .coerceIn(0, maxVolume)
+                                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, volume, 0)
+                                    overlayFeedback = "VOLUME · ${(volume * 100f / maxVolume).roundToInt()}%"
+                                }
+                            }
+                            if (gestureMode != 0) change.consume()
+                        }
+                    )
                 }
         ) {
             AndroidView(
@@ -137,7 +253,7 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                 style = MaterialTheme.typography.labelSmall
             )
 
-            seekFeedback?.let { feedback ->
+            overlayFeedback?.let { feedback ->
                 Box(
                     Modifier
                         .align(Alignment.Center)
@@ -145,7 +261,7 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                         .border(2.dp, ReplayInk)
                         .padding(horizontal = 18.dp, vertical = 10.dp)
                 ) {
-                    Text(feedback, fontWeight = FontWeight.Black, fontSize = 22.sp)
+                    Text(feedback, fontWeight = FontWeight.Black, fontSize = 20.sp)
                 }
             }
         }
@@ -199,6 +315,13 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                 }
                 PlayerButton("5S ▶", ReplayCyan, Modifier.weight(1f)) { seekBy(5_000L) }
             }
+
+            Text(
+                "GESTOS · swipe horizontal = tempo · vertical esq. = brilho · vertical dir. = volume",
+                color = ReplayMuted,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelSmall
+            )
         }
 
         Column(
