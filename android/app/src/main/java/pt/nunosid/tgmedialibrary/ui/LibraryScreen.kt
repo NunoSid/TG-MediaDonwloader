@@ -252,7 +252,7 @@ private fun StatusStrip(visible: Int, indexed: Int, connection: String) {
         Modifier
             .fillMaxWidth()
             .background(ReplayPanel)
-            .border(bottom = 2.dp, color = ReplayInk)
+            .bottomBorder(2.dp, ReplayInk)
             .height(IntrinsicSize.Min)
     ) {
         StatusCell("VISIBLE", visible.toString(), ReplayAcid, Modifier.weight(0.8f))
@@ -271,7 +271,7 @@ private fun StatusCell(
 ) {
     Column(
         modifier
-            .then(if (!final) Modifier.border(end = 2.dp, color = ReplayInk) else Modifier)
+            .then(if (!final) Modifier.endBorder(2.dp, ReplayInk) else Modifier)
             .padding(horizontal = 10.dp, vertical = 8.dp)
     ) {
         Box(Modifier.background(accent).padding(horizontal = 4.dp, vertical = 1.dp)) {
@@ -330,15 +330,15 @@ private fun Modifier.replayGridBackground(): Modifier =
         }
     }
 
-private fun Modifier.border(bottom: androidx.compose.ui.unit.Dp, color: Color): Modifier =
+private fun Modifier.bottomBorder(width: androidx.compose.ui.unit.Dp, color: Color): Modifier =
     drawBehind {
-        val stroke = bottom.toPx()
+        val stroke = width.toPx()
         drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - stroke), size = androidx.compose.ui.geometry.Size(size.width, stroke))
     }
 
-private fun Modifier.border(end: androidx.compose.ui.unit.Dp, color: Color): Modifier =
+private fun Modifier.endBorder(width: androidx.compose.ui.unit.Dp, color: Color): Modifier =
     drawBehind {
-        val stroke = end.toPx()
+        val stroke = width.toPx()
         drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(size.width - stroke, 0f), size = androidx.compose.ui.geometry.Size(stroke, size.height))
     }
 
