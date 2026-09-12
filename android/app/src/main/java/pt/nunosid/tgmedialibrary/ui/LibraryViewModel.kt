@@ -76,6 +76,11 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         _privacyUnlocked.value = false
     }
 
+    /** Called after returning from an external share target. */
+    fun purgeExternalShareCache() {
+        engine.purgePrivacyCaches()
+    }
+
     fun panicWipe() {
         ThumbnailMemoryCache.clear()
         _privacyUnlocked.value = false
@@ -193,7 +198,6 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     override fun onCleared() {
         ThumbnailMemoryCache.clear()
-        engine.purgeTransientFilesAsync()
         engine.close()
         super.onCleared()
     }
