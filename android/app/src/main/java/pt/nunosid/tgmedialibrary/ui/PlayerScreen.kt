@@ -53,7 +53,7 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                 .weight(1f)
                 .fillMaxWidth()
                 .background(ReplayInk)
-                .border(bottom = 2.dp, color = ReplayInk)
+                .border(2.dp, ReplayInk)
         ) {
             AndroidView(
                 factory = { PlayerView(it).apply { this.player = player } },
@@ -76,6 +76,7 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
             Modifier
                 .fillMaxWidth()
                 .background(ReplayPanel)
+                .border(2.dp, ReplayInk)
                 .padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
@@ -93,11 +94,3 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
         }
     }
 }
-
-private fun Modifier.border(bottom: androidx.compose.ui.unit.Dp, color: androidx.compose.ui.graphics.Color): Modifier =
-    this.then(
-        Modifier.drawBehind {
-            val stroke = bottom.toPx()
-            drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - stroke), size = androidx.compose.ui.geometry.Size(size.width, stroke))
-        }
-    )
