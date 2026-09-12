@@ -14,7 +14,8 @@ data class VideoItem(
     val mimeType: String,
     val caption: String,
     val supportsStreaming: Boolean,
-    val miniThumbnail: ByteArray?
+    val thumbnailFileId: Int?,
+    val thumbnailLocalPath: String?
 )
 
 enum class VideoSort {
