@@ -34,7 +34,7 @@ enum class HistoryScope {
 
 data class VideoFilters(
     val query: String = "",
-    val chatId: Long? = null,
+    val chatIds: Set<Long> = emptySet(),
     val minBytes: Long? = null,
     val maxBytes: Long? = null,
     val minDuration: Int? = null,
