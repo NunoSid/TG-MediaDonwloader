@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import pt.nunosid.tgmedialibrary.data.ThumbnailMemoryCache
 import pt.nunosid.tgmedialibrary.model.VideoItem
 import pt.nunosid.tgmedialibrary.telegram.TelegramEngine
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayAcid
@@ -49,16 +50,39 @@ fun VideoCard(
 ) {
     val context = LocalContext.current
     val bitmap by produceState<Bitmap?>(
-        initialValue = null,
+        initialValue = item.thumbnailFileId?.let(ThumbnailMemoryCache::get),
         key1 = item.thumbnailFileId,
         key2 = item.thumbnailLocalPath
     ) {
-        value = withContext(Dispatchers.IO) {
-            val existing = item.thumbnailLocalPath?.takeIf { File(it).exists() }
-            val path = existing ?: item.thumbnailFileId?.let {
-                runCatching { engine.downloadFilePath(it, priority = 8, timeoutSeconds = 90) }.getOrNull()
+        val thumbnailId = item.thumbnailFileId
+        if (thumbnailId != null) {
+            ThumbnailMemoryCache.get(thumbnailId)?.let {
+                value = it
+                return@produceState
             }
-            path?.let(BitmapFactory::decodeFile)
+        }
+
+        value = withContext(Dispatchers.IO) {
+            var path: String? = null
+            try {
+                path = item.thumbnailLocalPath?.takeIf { File(it).exists() }
+                    ?: thumbnailId?.let {
+                        runCatching {
+                            engine.downloadFilePath(it, priority = 8, timeoutSeconds = 90)
+                        }.getOrNull()
+                    }
+
+                val decoded = path?.let(BitmapFactory::decodeFile)
+                if (decoded != null && thumbnailId != null) {
+                    ThumbnailMemoryCache.put(thumbnailId, decoded)
+                }
+                decoded
+            } finally {
+                // Enforced zero-persistence thumbnail policy: once decoded into RAM,
+                // remove both the TDLib-managed copy and any remaining filesystem path.
+                if (thumbnailId != null) engine.deleteLocalFile(thumbnailId)
+                path?.let { localPath -> runCatching { File(localPath).delete() } }
+            }
         }
     }
 
