@@ -1,11 +1,12 @@
 package pt.nunosid.tgmedialibrary.ui.theme
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.unit.dp
 
 val ReplayInk = Color(0xFF111111)
 val ReplayPaper = Color(0xFFF3F0E8)
@@ -42,12 +43,14 @@ private val AppColors = lightColorScheme(
     outlineVariant = ReplaySoftLine
 )
 
+private val Square = RoundedCornerShape(0.dp)
+
 private val ReplayShapes = Shapes(
-    extraSmall = RectangleShape,
-    small = RectangleShape,
-    medium = RectangleShape,
-    large = RectangleShape,
-    extraLarge = RectangleShape
+    extraSmall = Square,
+    small = Square,
+    medium = Square,
+    large = Square,
+    extraLarge = Square
 )
 
 @Composable
