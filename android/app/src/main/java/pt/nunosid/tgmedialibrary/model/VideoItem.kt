@@ -41,3 +41,9 @@ data class VideoFilters(
     val maxDuration: Int? = null,
     val sort: VideoSort = VideoSort.NEWEST
 )
+
+data class FilterPreset(
+    val id: String,
+    val name: String,
+    val filters: VideoFilters
+)
