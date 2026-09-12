@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import org.drinkless.tdlib.Client
 import org.drinkless.tdlib.TdApi
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
@@ -27,6 +28,7 @@ class TelegramEngine(private val context: Context) {
     val authState: StateFlow<TelegramAuthState> = _authState.asStateFlow()
     private val _connectionLabel = MutableStateFlow("A iniciar")
     val connectionLabel: StateFlow<String> = _connectionLabel.asStateFlow()
+    private val transientFileIds = ConcurrentHashMap.newKeySet<Int>()
 
     private var client: Client? = null
     private var apiId = 0
@@ -52,6 +54,7 @@ class TelegramEngine(private val context: Context) {
     }
 
     fun resetApiCredentials() {
+        purgeTransientFilesAsync()
         runCatching { client?.send(TdApi.Close()) { } }
         client = null
         prefs.edit().clear().apply()
@@ -62,6 +65,7 @@ class TelegramEngine(private val context: Context) {
     }
 
     fun panicWipeLocal() {
+        purgeTransientFilesAsync()
         val active = client
         if (active != null) {
             val latch = CountDownLatch(1)
@@ -69,6 +73,7 @@ class TelegramEngine(private val context: Context) {
             runCatching { latch.await(3, TimeUnit.SECONDS) }
         }
         client = null
+        transientFileIds.clear()
         prefs.edit().clear().commit()
         apiId = 0
         apiHash = ""
@@ -147,11 +152,40 @@ class TelegramEngine(private val context: Context) {
         return path
     }
 
+    fun markTransientFile(fileId: Int) {
+        transientFileIds.add(fileId)
+    }
+
+    fun purgeTransientFile(fileId: Int) {
+        transientFileIds.remove(fileId)
+        runCatching { sendBlocking(TdApi.CancelDownloadFile(fileId, false), timeoutSeconds = 5) }
+        runCatching { sendBlocking(TdApi.DeleteFile(fileId), timeoutSeconds = 15) }
+    }
+
+    fun purgeTransientFileAsync(fileId: Int) {
+        transientFileIds.remove(fileId)
+        val active = client ?: return
+        runCatching { active.send(TdApi.CancelDownloadFile(fileId, false)) { } }
+        runCatching { active.send(TdApi.DeleteFile(fileId)) { } }
+    }
+
+    fun purgeTransientFilesAsync() {
+        val ids = transientFileIds.toList()
+        transientFileIds.clear()
+        val active = client ?: return
+        ids.forEach { fileId ->
+            runCatching { active.send(TdApi.CancelDownloadFile(fileId, false)) { } }
+            runCatching { active.send(TdApi.DeleteFile(fileId)) { } }
+        }
+    }
+
     fun deleteLocalFile(fileId: Int) {
+        transientFileIds.remove(fileId)
         runCatching { sendBlocking(TdApi.DeleteFile(fileId), timeoutSeconds = 30) }
     }
 
     fun deleteLocalFileAsync(fileId: Int) {
+        transientFileIds.remove(fileId)
         val active = client ?: return
         runCatching {
             active.send(TdApi.DeleteFile(fileId)) { /* best-effort cache purge */ }
@@ -182,6 +216,7 @@ class TelegramEngine(private val context: Context) {
     }
 
     fun close() {
+        purgeTransientFilesAsync()
         runCatching { client?.send(TdApi.Close()) { } }
         client = null
     }
