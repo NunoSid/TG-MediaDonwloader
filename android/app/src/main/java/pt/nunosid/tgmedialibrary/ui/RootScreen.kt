@@ -1,5 +1,6 @@
 package pt.nunosid.tgmedialibrary.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -13,6 +14,18 @@ import pt.nunosid.tgmedialibrary.telegram.TelegramAuthState
 
 @Composable
 fun RootScreen(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
+    val unlocked by viewModel.privacyUnlocked.collectAsState()
+
+    if (!unlocked) {
+        CalculatorLockScreen(
+            onUnlock = viewModel::tryUnlock,
+            onPanic = viewModel::panicWipe
+        )
+        return
+    }
+
+    BackHandler(enabled = true) { viewModel.lockPrivacy() }
+
     when (val auth = viewModel.authState.collectAsState().value) {
         TelegramAuthState.Starting -> CenterMessage("A iniciar Telegram…")
         TelegramAuthState.NeedApiCredentials -> ApiCredentialsInput(viewModel::configureApi)
