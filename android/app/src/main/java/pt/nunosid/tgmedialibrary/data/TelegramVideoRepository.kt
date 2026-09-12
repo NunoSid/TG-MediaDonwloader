@@ -8,6 +8,7 @@ import pt.nunosid.tgmedialibrary.model.VideoFilters
 import pt.nunosid.tgmedialibrary.model.VideoItem
 import pt.nunosid.tgmedialibrary.model.VideoSort
 import pt.nunosid.tgmedialibrary.telegram.TelegramEngine
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 class TelegramVideoRepository(private val engine: TelegramEngine) {
@@ -56,7 +57,17 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
                     runCatching { engine.sendBlocking(TdApi.GetChat(message.chatId)).title }
                         .getOrDefault("Conversa ${message.chatId}")
                 }
+
                 val thumbnailFile = video.thumbnail?.file
+                val existingThumbnailPath = thumbnailFile?.local?.path?.takeIf { it.isNotBlank() }
+
+                // Purge thumbnail files left by older versions or a previous TDLib cache.
+                // The UI will fetch them again only when needed, decode to RAM, then delete immediately.
+                if (thumbnailFile != null && existingThumbnailPath != null) {
+                    runCatching { File(existingThumbnailPath).delete() }
+                    engine.deleteLocalFileAsync(thumbnailFile.id)
+                }
+
                 all[message.chatId to message.id] = VideoItem(
                     messageId = message.id,
                     chatId = message.chatId,
@@ -72,7 +83,7 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
                     caption = content.caption?.text.orEmpty(),
                     supportsStreaming = video.supportsStreaming,
                     thumbnailFileId = thumbnailFile?.id,
-                    thumbnailLocalPath = thumbnailFile?.local?.path?.takeIf { it.isNotBlank() }
+                    thumbnailLocalPath = null
                 )
             }
 
