@@ -58,7 +58,7 @@ fun VideoCard(item: VideoItem, onPlay: (VideoItem) -> Unit) {
                     .fillMaxWidth()
                     .height(148.dp)
                     .background(ReplayCyan)
-                    .border(bottom = 2.dp, color = ReplayInk)
+                    .border(2.dp, ReplayInk)
             ) {
                 if (bitmap != null) {
                     Image(
@@ -158,12 +158,6 @@ private fun MetaTag(text: String, background: Color) {
         maxLines = 1
     )
 }
-
-private fun Modifier.border(bottom: androidx.compose.ui.unit.Dp, color: Color): Modifier =
-    this.drawBehind {
-        val stroke = bottom.toPx()
-        drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - stroke), size = androidx.compose.ui.geometry.Size(size.width, stroke))
-    }
 
 private fun durationLabel(seconds: Int): String {
     val h = seconds / 3600
