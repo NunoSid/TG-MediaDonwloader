@@ -26,9 +26,14 @@ class TelegramMediaActions(
     ): List<Uri> = withContext(Dispatchers.IO) {
         val result = ArrayList<Uri>(videos.size)
         videos.forEachIndexed { index, video ->
-            val sourcePath = engine.downloadFilePath(video.fileId, priority = 32)
-            val source = File(sourcePath)
-            result += copyToDownloads(source, safeName(video))
+            try {
+                val sourcePath = engine.downloadFilePath(video.fileId, priority = 32)
+                val source = File(sourcePath)
+                result += copyToDownloads(source, safeName(video), video.mimeType)
+            } finally {
+                // The explicit user copy remains in Downloads; the TDLib cache copy does not.
+                engine.purgeTransientFile(video.fileId)
+            }
             onProgress(index + 1, videos.size)
         }
         result
@@ -44,16 +49,21 @@ class TelegramMediaActions(
         }
         val result = ArrayList<Uri>(videos.size)
         videos.forEachIndexed { index, video ->
-            val sourcePath = engine.downloadFilePath(video.fileId, priority = 32)
-            val target = uniqueFile(shareDir, safeName(video))
-            FileInputStream(sourcePath).use { input ->
-                FileOutputStream(target).use { output -> input.copyTo(output) }
+            try {
+                val sourcePath = engine.downloadFilePath(video.fileId, priority = 32)
+                val target = uniqueFile(shareDir, safeName(video))
+                FileInputStream(sourcePath).use { input ->
+                    FileOutputStream(target).use { output -> input.copyTo(output) }
+                }
+                result += FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    target
+                )
+            } finally {
+                // Keep only the small controlled share staging copy until returning from Telegram.
+                engine.purgeTransientFile(video.fileId)
             }
-            result += FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                target
-            )
             onProgress(index + 1, videos.size)
         }
         result
@@ -89,12 +99,12 @@ class TelegramMediaActions(
             }
     }
 
-    private fun copyToDownloads(source: File, displayName: String): Uri {
+    private fun copyToDownloads(source: File, displayName: String, mimeType: String): Uri {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
-                put(MediaStore.MediaColumns.MIME_TYPE, mimeFromName(displayName))
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeType.ifBlank { mimeFromName(displayName) })
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Telegram Media Library")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
@@ -122,10 +132,19 @@ class TelegramMediaActions(
     }
 
     private fun safeName(video: VideoItem): String {
-        val fallback = "telegram_${video.chatId}_${video.messageId}.mp4"
+        val fallback = "telegram_${video.chatId}_${video.messageId}.${extensionFor(video.mimeType)}"
         val raw = video.fileName.trim().ifBlank { fallback }
         val clean = raw.replace(Regex("[\\/:*?\"<>|]"), "_")
-        return if (clean.contains('.')) clean else "$clean.mp4"
+        return if (clean.contains('.')) clean else "$clean.${extensionFor(video.mimeType)}"
+    }
+
+    private fun extensionFor(mime: String): String = when (mime.lowercase()) {
+        "video/quicktime" -> "mov"
+        "video/x-matroska" -> "mkv"
+        "video/webm" -> "webm"
+        "video/x-msvideo" -> "avi"
+        "image/gif" -> "gif"
+        else -> "mp4"
     }
 
     private fun uniqueFile(dir: File, name: String): File {
@@ -147,6 +166,7 @@ class TelegramMediaActions(
         "mkv" -> "video/x-matroska"
         "webm" -> "video/webm"
         "avi" -> "video/x-msvideo"
+        "gif" -> "image/gif"
         else -> "video/mp4"
     }
 }
