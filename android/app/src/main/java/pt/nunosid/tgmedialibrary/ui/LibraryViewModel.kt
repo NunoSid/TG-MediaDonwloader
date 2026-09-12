@@ -164,7 +164,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                     val obj = array.getJSONObject(i)
                     val filters = VideoFilters(
                         query = obj.optString("query", ""),
-                        chatId = obj.optLongNullable("chatId"),
+                        chatIds = obj.optChatIds(),
                         minBytes = obj.optLongNullable("minBytes"),
                         maxBytes = obj.optLongNullable("maxBytes"),
                         minDuration = obj.optIntNullable("minDuration"),
@@ -186,7 +186,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
                 put("id", preset.id)
                 put("name", preset.name)
                 put("query", f.query)
-                putNullable("chatId", f.chatId)
+                put("chatIds", JSONArray().apply { f.chatIds.sorted().forEach { put(it) } })
                 putNullable("minBytes", f.minBytes)
                 putNullable("maxBytes", f.maxBytes)
                 putNullable("minDuration", f.minDuration)
@@ -212,6 +212,20 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
 private fun JSONObject.putNullable(key: String, value: Any?) {
     if (value == null) put(key, JSONObject.NULL) else put(key, value)
+}
+
+private fun JSONObject.optChatIds(): Set<Long> {
+    val result = linkedSetOf<Long>()
+    optJSONArray("chatIds")?.let { array ->
+        for (i in 0 until array.length()) {
+            runCatching { array.getLong(i) }.getOrNull()?.let(result::add)
+        }
+    }
+    if (result.isNotEmpty()) return result
+
+    // Backwards compatibility with v0.8.0 and older single-chat presets.
+    optLongNullable("chatId")?.let(result::add)
+    return result
 }
 
 private fun JSONObject.optLongNullable(key: String): Long? =
