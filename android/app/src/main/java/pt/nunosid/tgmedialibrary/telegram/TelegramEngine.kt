@@ -151,6 +151,13 @@ class TelegramEngine(private val context: Context) {
         runCatching { sendBlocking(TdApi.DeleteFile(fileId), timeoutSeconds = 30) }
     }
 
+    fun deleteLocalFileAsync(fileId: Int) {
+        val active = client ?: return
+        runCatching {
+            active.send(TdApi.DeleteFile(fileId)) { /* best-effort cache purge */ }
+        }
+    }
+
     fun <T : TdApi.Object> send(function: TdApi.Function<T>, onResult: ((T) -> Unit)? = null) {
         val active = client ?: return
         active.send(function) { result ->
