@@ -3,10 +3,12 @@ package pt.nunosid.tgmedialibrary.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.text.format.Formatter
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,6 +41,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun VideoCard(
     item: VideoItem,
@@ -46,7 +49,8 @@ fun VideoCard(
     selectionMode: Boolean,
     selected: Boolean,
     onPlay: (VideoItem) -> Unit,
-    onToggleSelection: (VideoItem) -> Unit
+    onToggleSelection: (VideoItem) -> Unit,
+    onLongSelect: (VideoItem) -> Unit
 ) {
     val context = LocalContext.current
     val bitmap by produceState<Bitmap?>(
@@ -78,8 +82,6 @@ fun VideoCard(
                 }
                 decoded
             } finally {
-                // Enforced zero-persistence thumbnail policy: once decoded into RAM,
-                // remove both the TDLib-managed copy and any remaining filesystem path.
                 if (thumbnailId != null) engine.deleteLocalFile(thumbnailId)
                 path?.let { localPath -> runCatching { File(localPath).delete() } }
             }
@@ -98,9 +100,14 @@ fun VideoCard(
                 .fillMaxWidth()
                 .background(if (selected) ReplayAcid else ReplayPanel)
                 .border(if (selected) 3.dp else 2.dp, ReplayInk)
-                .clickable {
-                    if (selectionMode) onToggleSelection(item) else onPlay(item)
-                }
+                .combinedClickable(
+                    onClick = {
+                        if (selectionMode) onToggleSelection(item) else onPlay(item)
+                    },
+                    onLongClick = {
+                        if (selectionMode) onToggleSelection(item) else onLongSelect(item)
+                    }
+                )
         ) {
             Box(
                 Modifier
