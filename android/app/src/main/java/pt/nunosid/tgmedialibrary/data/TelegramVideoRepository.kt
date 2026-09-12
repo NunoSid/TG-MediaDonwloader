@@ -240,7 +240,7 @@ class TelegramVideoRepository(private val engine: TelegramEngine) {
         val q = filters.query.trim().lowercase()
         val filtered = source.asSequence().filter { item ->
             (q.isBlank() || item.fileName.lowercase().contains(q) || item.caption.lowercase().contains(q) || item.chatTitle.lowercase().contains(q)) &&
-                (filters.chatId == null || filters.chatId == item.chatId) &&
+                (filters.chatIds.isEmpty() || item.chatId in filters.chatIds) &&
                 (filters.minBytes == null || item.fileSize >= filters.minBytes) &&
                 (filters.maxBytes == null || item.fileSize <= filters.maxBytes) &&
                 (filters.minDuration == null || item.durationSeconds >= filters.minDuration) &&
