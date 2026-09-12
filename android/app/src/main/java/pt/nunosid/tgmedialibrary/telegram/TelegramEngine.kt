@@ -61,6 +61,25 @@ class TelegramEngine(private val context: Context) {
         _authState.value = TelegramAuthState.NeedApiCredentials
     }
 
+    fun panicWipeLocal() {
+        val active = client
+        if (active != null) {
+            val latch = CountDownLatch(1)
+            runCatching { active.send(TdApi.Close()) { latch.countDown() } }
+            runCatching { latch.await(3, TimeUnit.SECONDS) }
+        }
+        client = null
+        prefs.edit().clear().commit()
+        apiId = 0
+        apiHash = ""
+
+        runCatching { File(context.filesDir, "tdlib").deleteRecursively() }
+        runCatching { context.cacheDir.listFiles()?.forEach { it.deleteRecursively() } }
+
+        _connectionLabel.value = "Dados locais apagados"
+        _authState.value = TelegramAuthState.NeedApiCredentials
+    }
+
     private fun startClient() {
         if (client != null) return
         _authState.value = TelegramAuthState.Starting
