@@ -19,6 +19,8 @@ import pt.nunosid.tgmedialibrary.ui.theme.TelegramMediaLibraryTheme
 
 class MainActivity : ComponentActivity() {
     private var privacyLockAction: (() -> Unit)? = null
+    private var resumeCleanupAction: (() -> Unit)? = null
+    private var lockedByStop = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,6 +38,7 @@ class MainActivity : ComponentActivity() {
                         playing = null
                         vm.lockPrivacy()
                     }
+                    resumeCleanupAction = vm::purgeExternalShareCache
                 }
 
                 BackHandler(enabled = playing != null) { playing = null }
@@ -46,15 +49,26 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (lockedByStop) {
+            // External share targets have finished using granted URIs by the time we return.
+            resumeCleanupAction?.invoke()
+            lockedByStop = false
+        }
+    }
+
     override fun onStop() {
         super.onStop()
         if (!isChangingConfigurations) {
+            lockedByStop = true
             privacyLockAction?.invoke()
         }
     }
 
     override fun onDestroy() {
         privacyLockAction = null
+        resumeCleanupAction = null
         super.onDestroy()
     }
 }
