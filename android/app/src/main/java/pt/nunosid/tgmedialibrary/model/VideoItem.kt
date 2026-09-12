@@ -1,0 +1,32 @@
+package pt.nunosid.tgmedialibrary.model
+
+data class VideoItem(
+    val messageId: Long,
+    val chatId: Long,
+    val chatTitle: String,
+    val dateUnix: Int,
+    val fileId: Int,
+    val fileSize: Long,
+    val durationSeconds: Int,
+    val width: Int,
+    val height: Int,
+    val fileName: String,
+    val mimeType: String,
+    val caption: String,
+    val supportsStreaming: Boolean,
+    val miniThumbnail: ByteArray?
+)
+
+enum class VideoSort {
+    NEWEST, OLDEST, LARGEST, SMALLEST, LONGEST, SHORTEST
+}
+
+data class VideoFilters(
+    val query: String = "",
+    val chatId: Long? = null,
+    val minBytes: Long? = null,
+    val maxBytes: Long? = null,
+    val minDuration: Int? = null,
+    val maxDuration: Int? = null,
+    val sort: VideoSort = VideoSort.NEWEST
+)

@@ -1,0 +1,6 @@
+# Android SDK path (example Windows)
+sdk.dir=C\\:\\Users\\YOUR_USER\\AppData\\Local\\Android\\Sdk
+
+# Create these at https://my.telegram.org > API development tools
+telegram.api_id=12345678
+telegram.api_hash=replace_with_your_api_hash
