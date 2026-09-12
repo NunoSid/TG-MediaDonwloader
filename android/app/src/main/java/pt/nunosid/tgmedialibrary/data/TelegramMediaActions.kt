@@ -29,7 +29,6 @@ class TelegramMediaActions(
             val sourcePath = engine.downloadFilePath(video.fileId, priority = 32)
             val source = File(sourcePath)
             result += copyToDownloads(source, safeName(video))
-            engine.deleteLocalFile(video.fileId)
             onProgress(index + 1, videos.size)
         }
         result
@@ -55,7 +54,6 @@ class TelegramMediaActions(
                 "${context.packageName}.fileprovider",
                 target
             )
-            engine.deleteLocalFile(video.fileId)
             onProgress(index + 1, videos.size)
         }
         result
@@ -95,10 +93,10 @@ class TelegramMediaActions(
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, displayName)
-                put(MediaStore.Downloads.MIME_TYPE, mimeFromName(displayName))
-                put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Telegram Media Library")
-                put(MediaStore.Downloads.IS_PENDING, 1)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                put(MediaStore.MediaColumns.MIME_TYPE, mimeFromName(displayName))
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/Telegram Media Library")
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             val uri = checkNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values))
             try {
@@ -106,7 +104,7 @@ class TelegramMediaActions(
                     FileInputStream(source).use { input -> input.copyTo(output) }
                 }
                 values.clear()
-                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                values.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 resolver.update(uri, values, null, null)
                 uri
             } catch (t: Throwable) {
