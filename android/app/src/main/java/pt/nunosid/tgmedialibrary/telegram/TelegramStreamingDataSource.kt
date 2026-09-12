@@ -9,8 +9,8 @@ import java.io.RandomAccessFile
 
 /**
  * Media3 DataSource backed by TDLib partial file requests.
- * Only the range needed by the player is fetched. On close the TDLib local file is deleted,
- * so playback doesn't create a persistent user download.
+ * Only the range needed by the player is fetched. Closing a segment cancels the active
+ * range request but deliberately keeps TDLib's cache intact so seek/reopen remains smooth.
  */
 class TelegramStreamingDataSource(
     private val engine: TelegramEngine,
@@ -69,6 +69,5 @@ class TelegramStreamingDataSource(
             transferEnded()
         }
         runCatching { engine.sendBlocking(TdApi.CancelDownloadFile(fileId, true), 5) }
-        runCatching { engine.sendBlocking(TdApi.DeleteFile(fileId), 5) }
     }
 }
