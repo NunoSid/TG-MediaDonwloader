@@ -1,5 +1,6 @@
 package pt.nunosid.tgmedialibrary.ui
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.text.format.Formatter
 import androidx.compose.foundation.Image
@@ -10,7 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,22 +23,43 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import pt.nunosid.tgmedialibrary.model.VideoItem
+import pt.nunosid.tgmedialibrary.telegram.TelegramEngine
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayAcid
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayCyan
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayInk
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayMuted
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayPanel
 import pt.nunosid.tgmedialibrary.ui.theme.ReplayPink
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 @Composable
-fun VideoCard(item: VideoItem, onPlay: (VideoItem) -> Unit) {
+fun VideoCard(
+    item: VideoItem,
+    engine: TelegramEngine,
+    selectionMode: Boolean,
+    selected: Boolean,
+    onPlay: (VideoItem) -> Unit,
+    onToggleSelection: (VideoItem) -> Unit
+) {
     val context = LocalContext.current
-    val bitmap = remember(item.miniThumbnail) {
-        item.miniThumbnail?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+    val bitmap by produceState<Bitmap?>(
+        initialValue = null,
+        key1 = item.thumbnailFileId,
+        key2 = item.thumbnailLocalPath
+    ) {
+        value = withContext(Dispatchers.IO) {
+            val existing = item.thumbnailLocalPath?.takeIf { File(it).exists() }
+            val path = existing ?: item.thumbnailFileId?.let {
+                runCatching { engine.downloadFilePath(it, priority = 8, timeoutSeconds = 90) }.getOrNull()
+            }
+            path?.let(BitmapFactory::decodeFile)
+        }
     }
 
     Box(Modifier.padding(start = 2.dp, top = 2.dp, end = 6.dp, bottom = 6.dp)) {
@@ -49,9 +72,11 @@ fun VideoCard(item: VideoItem, onPlay: (VideoItem) -> Unit) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .background(ReplayPanel)
-                .border(2.dp, ReplayInk)
-                .clickable { onPlay(item) }
+                .background(if (selected) ReplayAcid else ReplayPanel)
+                .border(if (selected) 3.dp else 2.dp, ReplayInk)
+                .clickable {
+                    if (selectionMode) onToggleSelection(item) else onPlay(item)
+                }
         ) {
             Box(
                 Modifier
@@ -62,20 +87,19 @@ fun VideoCard(item: VideoItem, onPlay: (VideoItem) -> Unit) {
             ) {
                 if (bitmap != null) {
                     Image(
-                        bitmap.asImageBitmap(),
-                        contentDescription = null,
+                        bitmap!!.asImageBitmap(),
+                        contentDescription = "Pré-visualização do vídeo",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Crop
                     )
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.08f)))
                 } else {
-                    Text(
-                        "▶",
+                    Column(
                         modifier = Modifier.align(Alignment.Center),
-                        color = ReplayInk,
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.Black
-                    )
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text("▶", color = ReplayInk, fontSize = 38.sp, fontWeight = FontWeight.Black)
+                        Text("PREVIEW", color = ReplayInk, fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
 
                 Text(
@@ -92,12 +116,13 @@ fun VideoCard(item: VideoItem, onPlay: (VideoItem) -> Unit) {
                 )
 
                 Text(
-                    "VIDEO",
+                    if (selectionMode) if (selected) "SELECTED ✓" else "SELECT" else "VIDEO",
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .padding(7.dp)
-                        .background(ReplayPink)
+                        .background(if (selected) ReplayAcid else ReplayPink)
                         .border(2.dp, ReplayInk)
+                        .clickable(enabled = selectionMode) { onToggleSelection(item) }
                         .padding(horizontal = 7.dp, vertical = 3.dp),
                     color = ReplayInk,
                     fontWeight = FontWeight.Black,
