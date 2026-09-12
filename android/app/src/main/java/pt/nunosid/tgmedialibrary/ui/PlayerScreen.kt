@@ -16,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -138,7 +137,7 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                     var startX = 0f
                     var totalX = 0f
                     var totalY = 0f
-                    var gestureMode = 0 // 1 horizontal seek, 2 brightness, 3 volume
+                    var gestureMode = 0
                     var startPosition = 0L
                     var wasPlaying = false
                     var startBrightness = 0.5f
