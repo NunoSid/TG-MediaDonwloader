@@ -1,16 +1,19 @@
 package pt.nunosid.tgmedialibrary.ui
 
 import android.net.Uri
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
@@ -19,6 +22,12 @@ import androidx.media3.ui.PlayerView
 import pt.nunosid.tgmedialibrary.model.VideoItem
 import pt.nunosid.tgmedialibrary.telegram.TelegramEngine
 import pt.nunosid.tgmedialibrary.telegram.TelegramStreamingDataSource
+import pt.nunosid.tgmedialibrary.ui.theme.ReplayAcid
+import pt.nunosid.tgmedialibrary.ui.theme.ReplayInk
+import pt.nunosid.tgmedialibrary.ui.theme.ReplayMuted
+import pt.nunosid.tgmedialibrary.ui.theme.ReplayPanel
+import pt.nunosid.tgmedialibrary.ui.theme.ReplayPaper
+import pt.nunosid.tgmedialibrary.ui.theme.ReplayPink
 
 @Composable
 fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
@@ -38,12 +47,57 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
 
     DisposableEffect(player) { onDispose { player.release() } }
 
-    Column(Modifier.fillMaxSize()) {
-        AndroidView(
-            factory = { PlayerView(it).apply { this.player = player } },
-            modifier = Modifier.weight(1f).fillMaxSize()
-        )
-        Text(video.chatTitle, Modifier.padding(12.dp))
-        if (video.caption.isNotBlank()) Text(video.caption, Modifier.padding(horizontal = 12.dp, vertical = 4.dp))
+    Column(Modifier.fillMaxSize().background(ReplayPaper)) {
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(ReplayInk)
+                .border(bottom = 2.dp, color = ReplayInk)
+        ) {
+            AndroidView(
+                factory = { PlayerView(it).apply { this.player = player } },
+                modifier = Modifier.fillMaxSize()
+            )
+            Text(
+                "PLAY//TG",
+                modifier = Modifier
+                    .padding(10.dp)
+                    .background(ReplayPink)
+                    .border(2.dp, ReplayInk)
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+                fontWeight = FontWeight.Black,
+                letterSpacing = 1.sp,
+                style = MaterialTheme.typography.labelSmall
+            )
+        }
+
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .background(ReplayPanel)
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(Modifier.background(ReplayAcid).border(2.dp, ReplayInk).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                Text(video.chatTitle.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+            }
+            Text(
+                video.fileName.ifBlank { "VÍDEO" },
+                fontWeight = FontWeight.Black,
+                style = MaterialTheme.typography.titleMedium
+            )
+            if (video.caption.isNotBlank()) {
+                Text(video.caption, color = ReplayMuted, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
+
+private fun Modifier.border(bottom: androidx.compose.ui.unit.Dp, color: androidx.compose.ui.graphics.Color): Modifier =
+    this.then(
+        Modifier.drawBehind {
+            val stroke = bottom.toPx()
+            drawRect(color, topLeft = androidx.compose.ui.geometry.Offset(0f, size.height - stroke), size = androidx.compose.ui.geometry.Size(size.width, stroke))
+        }
+    )
