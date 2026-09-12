@@ -40,7 +40,8 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
     val items by viewModel.visibleVideos.collectAsState(initial = emptyList())
     val catalog by viewModel.videos.collectAsState()
     val filters by viewModel.filters.collectAsState()
-    val scope by viewModel.historyScope.collectAsState()
+    val presets by viewModel.filterPresets.collectAsState()
+    val historyScope by viewModel.historyScope.collectAsState()
     val loading by viewModel.loading.collectAsState()
     val loadedCount by viewModel.loadedCount.collectAsState()
     val pages by viewModel.indexedPages.collectAsState()
@@ -56,6 +57,11 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
     fun toggleSelection(video: VideoItem) {
         val key = videoKey(video)
         if (selected.containsKey(key)) selected.remove(key) else selected[key] = video
+    }
+
+    fun longSelect(video: VideoItem) {
+        selectionMode = true
+        selected[videoKey(video)] = video
     }
 
     fun finishSelection() {
@@ -222,7 +228,7 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                 ) {
                     Box(Modifier.weight(1f)) {
                         ReplayButton(
-                            text = scope.shortLabel(),
+                            text = historyScope.shortLabel(),
                             background = ReplayPanel,
                             enabled = !loading && !transferBusy,
                             modifier = Modifier.fillMaxWidth(),
@@ -281,7 +287,7 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                         .padding(10.dp)
                 ) {
                     Text(
-                        "INDEXANDO ${scope.label().uppercase()}",
+                        "INDEXANDO ${historyScope.label().uppercase()}",
                         fontWeight = FontWeight.Black,
                         letterSpacing = 0.8.sp,
                         style = MaterialTheme.typography.labelMedium
@@ -343,7 +349,8 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
                             selectionMode = selectionMode,
                             selected = selected.containsKey(videoKey(video)),
                             onPlay = onPlay,
-                            onToggleSelection = ::toggleSelection
+                            onToggleSelection = ::toggleSelection,
+                            onLongSelect = ::longSelect
                         )
                     }
                 }
@@ -351,9 +358,19 @@ fun VideoLibrary(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
         }
     }
 
-    if (filtersOpen) FilterDialog(filters, catalog, { filtersOpen = false }) {
-        viewModel.updateFilters { _ -> it }
-        filtersOpen = false
+    if (filtersOpen) {
+        FilterDialog(
+            current = filters,
+            videos = catalog,
+            presets = presets,
+            onDismiss = { filtersOpen = false },
+            onApply = {
+                viewModel.updateFilters { _ -> it }
+                filtersOpen = false
+            },
+            onSavePreset = viewModel::savePreset,
+            onDeletePreset = viewModel::deletePreset
+        )
     }
 }
 
