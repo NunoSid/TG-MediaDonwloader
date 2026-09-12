@@ -2,8 +2,10 @@ package pt.nunosid.tgmedialibrary.ui
 
 import android.app.Activity
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -17,11 +19,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -46,6 +52,7 @@ import kotlin.math.roundToInt
 fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
     val context = LocalContext.current
     val activity = context as? Activity
+    val configuration = LocalConfiguration.current
     val audioManager = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
     val scope = rememberCoroutineScope()
     val mediaActions = remember(engine) { TelegramMediaActions(context.applicationContext, engine) }
@@ -71,12 +78,47 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
     var overlayFeedback by remember { mutableStateOf<String?>(null) }
     var transferBusy by remember { mutableStateOf(false) }
     var transferStatus by remember { mutableStateOf<String?>(null) }
+    var isFullscreen by remember { mutableStateOf(false) }
+
+    fun applyFullscreenMode(fullscreen: Boolean) {
+        val host = activity ?: return
+        val window = host.window
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        if (fullscreen) {
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            host.requestedOrientation = if (video.width > 0 && video.height > video.width) {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            } else {
+                ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            }
+        } else {
+            host.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            WindowCompat.setDecorFitsSystemWindows(window, true)
+            controller.show(WindowInsetsCompat.Type.systemBars())
+        }
+    }
+
+    LaunchedEffect(isFullscreen, configuration.orientation) {
+        applyFullscreenMode(isFullscreen)
+    }
 
     DisposableEffect(player, video.fileId) {
         onDispose {
             player.release()
             engine.purgeTransientFileAsync(video.fileId)
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            if (isFullscreen) applyFullscreenMode(false)
+        }
+    }
+
+    BackHandler(enabled = isFullscreen) {
+        isFullscreen = false
     }
 
     LaunchedEffect(player) {
@@ -108,13 +150,15 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
         overlayFeedback = if (deltaMs > 0) "+5s" else "−5s"
     }
 
-    Column(Modifier.fillMaxSize().background(ReplayPaper)) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(if (isFullscreen) Color.Black else ReplayPaper)
+    ) {
         Box(
-            Modifier
-                .weight(1f)
-                .fillMaxWidth()
+            (if (isFullscreen) Modifier.fillMaxSize() else Modifier.weight(1f).fillMaxWidth())
                 .background(Color.Black)
-                .border(2.dp, ReplayInk)
+                .then(if (isFullscreen) Modifier else Modifier.border(2.dp, ReplayInk))
                 .pointerInput(player, durationMs) {
                     detectTapGestures(
                         onDoubleTap = { offset ->
@@ -239,18 +283,36 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
                 modifier = Modifier.fillMaxSize()
             )
 
-            Text(
-                "PLAY//TG",
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(10.dp)
-                    .background(ReplayPink)
-                    .border(2.dp, ReplayInk)
-                    .padding(horizontal = 7.dp, vertical = 3.dp),
-                fontWeight = FontWeight.Black,
-                letterSpacing = 1.sp,
-                style = MaterialTheme.typography.labelSmall
-            )
+            if (!isFullscreen) {
+                Text(
+                    "PLAY//TG",
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .background(ReplayPink)
+                        .border(2.dp, ReplayInk)
+                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                    fontWeight = FontWeight.Black,
+                    letterSpacing = 1.sp,
+                    style = MaterialTheme.typography.labelSmall
+                )
+            } else {
+                OutlinedButton(
+                    onClick = { isFullscreen = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(14.dp),
+                    shape = RectangleShape,
+                    border = BorderStroke(2.dp, Color.White),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = Color.Black.copy(alpha = 0.55f),
+                        contentColor = Color.White
+                    ),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text("EXIT ⛶", fontWeight = FontWeight.Black)
+                }
+            }
 
             overlayFeedback?.let { feedback ->
                 Box(
@@ -265,112 +327,118 @@ fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
             }
         }
 
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(ReplayPanel)
-                .border(2.dp, ReplayInk)
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(timeLabel(if (scrubbing) scrubMs.toLong() else currentMs), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-                Slider(
-                    value = if (durationMs > 0) scrubMs.coerceIn(0f, durationMs.toFloat()) else 0f,
-                    onValueChange = { value ->
-                        if (!scrubbing) {
-                            resumeAfterScrub = player.isPlaying || player.playWhenReady
-                            scrubbing = true
-                        }
-                        scrubMs = value
-                    },
-                    onValueChangeFinished = {
-                        player.seekTo(scrubMs.toLong())
-                        currentMs = scrubMs.toLong()
-                        scrubbing = false
-                        if (resumeAfterScrub) {
-                            player.playWhenReady = true
-                            player.play()
-                        }
-                    },
-                    valueRange = 0f..(if (durationMs > 0) durationMs.toFloat() else 1f),
-                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
-                    colors = SliderDefaults.colors(
-                        thumbColor = ReplayInk,
-                        activeTrackColor = ReplayPink,
-                        inactiveTrackColor = ReplayCyan
-                    )
-                )
-                Text(timeLabel(durationMs), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-            }
-
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+        if (!isFullscreen) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(ReplayPanel)
+                    .border(2.dp, ReplayInk)
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                PlayerButton("◀ 5S", ReplayCyan, Modifier.weight(1f)) { seekBy(-5_000L) }
-                PlayerButton(if (isPlaying) "PAUSE" else "PLAY", ReplayAcid, Modifier.weight(1.2f)) {
-                    if (player.isPlaying) player.pause() else player.play()
-                }
-                PlayerButton("5S ▶", ReplayCyan, Modifier.weight(1f)) { seekBy(5_000L) }
-            }
-
-            Text(
-                "GESTOS · swipe horizontal = tempo · vertical esq. = brilho · vertical dir. = volume",
-                color = ReplayMuted,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.labelSmall
-            )
-        }
-
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .background(ReplayPanel)
-                .border(2.dp, ReplayInk)
-                .padding(14.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(Modifier.background(ReplayAcid).border(2.dp, ReplayInk).padding(horizontal = 7.dp, vertical = 3.dp)) {
-                Text(video.chatTitle.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
-            }
-            Text(
-                video.fileName.ifBlank { "VÍDEO" },
-                fontWeight = FontWeight.Black,
-                style = MaterialTheme.typography.titleMedium
-            )
-            if (video.caption.isNotBlank()) {
-                Text(video.caption, color = ReplayMuted, style = MaterialTheme.typography.bodySmall, maxLines = 3)
-            }
-
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PlayerButton("DOWNLOAD", ReplayCyan, Modifier.weight(1f), enabled = !transferBusy) {
-                    scope.launch {
-                        transferBusy = true
-                        transferStatus = "A DESCARREGAR…"
-                        runCatching { mediaActions.downloadToDevice(listOf(video)) }
-                            .onSuccess { transferStatus = "GUARDADO EM DOWNLOADS / TELEGRAM MEDIA LIBRARY" }
-                            .onFailure { transferStatus = "ERRO: ${it.message}" }
-                        transferBusy = false
-                    }
-                }
-                PlayerButton("TELEGRAM", ReplayPink, Modifier.weight(1f), enabled = !transferBusy) {
-                    scope.launch {
-                        transferBusy = true
-                        transferStatus = "A PREPARAR PARA TELEGRAM…"
-                        runCatching { mediaActions.prepareShare(listOf(video)) }
-                            .onSuccess {
-                                transferStatus = null
-                                mediaActions.shareViaTelegram(it)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(timeLabel(if (scrubbing) scrubMs.toLong() else currentMs), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                    Slider(
+                        value = if (durationMs > 0) scrubMs.coerceIn(0f, durationMs.toFloat()) else 0f,
+                        onValueChange = { value ->
+                            if (!scrubbing) {
+                                resumeAfterScrub = player.isPlaying || player.playWhenReady
+                                scrubbing = true
                             }
-                            .onFailure { transferStatus = "ERRO: ${it.message}" }
-                        transferBusy = false
-                    }
+                            scrubMs = value
+                        },
+                        onValueChangeFinished = {
+                            player.seekTo(scrubMs.toLong())
+                            currentMs = scrubMs.toLong()
+                            scrubbing = false
+                            if (resumeAfterScrub) {
+                                player.playWhenReady = true
+                                player.play()
+                            }
+                        },
+                        valueRange = 0f..(if (durationMs > 0) durationMs.toFloat() else 1f),
+                        modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                        colors = SliderDefaults.colors(
+                            thumbColor = ReplayInk,
+                            activeTrackColor = ReplayPink,
+                            inactiveTrackColor = ReplayCyan
+                        )
+                    )
+                    Text(timeLabel(durationMs), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
                 }
+
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    PlayerButton("◀ 5S", ReplayCyan, Modifier.weight(1f)) { seekBy(-5_000L) }
+                    PlayerButton(if (isPlaying) "PAUSE" else "PLAY", ReplayAcid, Modifier.weight(1.2f)) {
+                        if (player.isPlaying) player.pause() else player.play()
+                    }
+                    PlayerButton("5S ▶", ReplayCyan, Modifier.weight(1f)) { seekBy(5_000L) }
+                }
+
+                PlayerButton("⛶ FULL SCREEN", ReplayPink, Modifier.fillMaxWidth()) {
+                    isFullscreen = true
+                }
+
+                Text(
+                    "GESTOS · swipe horizontal = tempo · vertical esq. = brilho · vertical dir. = volume",
+                    color = ReplayMuted,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
 
-            transferStatus?.let {
-                Text(it, color = ReplayMuted, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(ReplayPanel)
+                    .border(2.dp, ReplayInk)
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(Modifier.background(ReplayAcid).border(2.dp, ReplayInk).padding(horizontal = 7.dp, vertical = 3.dp)) {
+                    Text(video.chatTitle.uppercase(), fontWeight = FontWeight.Black, style = MaterialTheme.typography.labelSmall)
+                }
+                Text(
+                    video.fileName.ifBlank { "VÍDEO" },
+                    fontWeight = FontWeight.Black,
+                    style = MaterialTheme.typography.titleMedium
+                )
+                if (video.caption.isNotBlank()) {
+                    Text(video.caption, color = ReplayMuted, style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                }
+
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PlayerButton("DOWNLOAD", ReplayCyan, Modifier.weight(1f), enabled = !transferBusy) {
+                        scope.launch {
+                            transferBusy = true
+                            transferStatus = "A DESCARREGAR…"
+                            runCatching { mediaActions.downloadToDevice(listOf(video)) }
+                                .onSuccess { transferStatus = "GUARDADO EM DOWNLOADS / TELEGRAM MEDIA LIBRARY" }
+                                .onFailure { transferStatus = "ERRO: ${it.message}" }
+                            transferBusy = false
+                        }
+                    }
+                    PlayerButton("TELEGRAM", ReplayPink, Modifier.weight(1f), enabled = !transferBusy) {
+                        scope.launch {
+                            transferBusy = true
+                            transferStatus = "A PREPARAR PARA TELEGRAM…"
+                            runCatching { mediaActions.prepareShare(listOf(video)) }
+                                .onSuccess {
+                                    transferStatus = null
+                                    mediaActions.shareViaTelegram(it)
+                                }
+                                .onFailure { transferStatus = "ERRO: ${it.message}" }
+                            transferBusy = false
+                        }
+                    }
+                }
+
+                transferStatus?.let {
+                    Text(it, color = ReplayMuted, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.labelSmall)
+                }
             }
         }
     }
