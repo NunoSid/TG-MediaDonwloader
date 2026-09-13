@@ -48,6 +48,7 @@ import pt.nunosid.tgmedialibrary.ui.theme.ReplayPink
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable
 fun PlayerScreen(video: VideoItem, engine: TelegramEngine) {
     val context = LocalContext.current
