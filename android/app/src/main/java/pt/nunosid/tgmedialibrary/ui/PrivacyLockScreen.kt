@@ -4,7 +4,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -29,6 +31,7 @@ fun PrivacyPinSetupScreen(onSetPin: (String) -> Boolean) {
     var pin by remember { mutableStateOf("") }
     var confirm by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var showPolicy by remember { mutableStateOf(false) }
 
     PrivacyShell("PRIVACY//SETUP", "CRIAR PIN DE PRIVACIDADE", ReplayCyan) {
         Text(
@@ -65,13 +68,19 @@ fun PrivacyPinSetupScreen(onSetPin: (String) -> Boolean) {
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.labelSmall
         )
+        TextButton(onClick = { showPolicy = true }) {
+            Text("POLÍTICA DE PRIVACIDADE", fontWeight = FontWeight.Black, color = ReplayInk)
+        }
     }
+
+    if (showPolicy) PrivacyPolicyDialog { showPolicy = false }
 }
 
 @Composable
 fun PrivacyLockScreen(onUnlock: (String) -> Boolean) {
     var pin by remember { mutableStateOf("") }
     var error by remember { mutableStateOf(false) }
+    var showPolicy by remember { mutableStateOf(false) }
 
     PrivacyShell("PRIVACY//LOCK", "TG MEDIA LIBRARY BLOQUEADA", ReplayPink) {
         Text(
@@ -101,7 +110,45 @@ fun PrivacyLockScreen(onUnlock: (String) -> Boolean) {
         ) {
             Text("DESBLOQUEAR", fontWeight = FontWeight.Black)
         }
+        TextButton(onClick = { showPolicy = true }) {
+            Text("POLÍTICA DE PRIVACIDADE", fontWeight = FontWeight.Black, color = ReplayInk)
+        }
     }
+
+    if (showPolicy) PrivacyPolicyDialog { showPolicy = false }
+}
+
+@Composable
+private fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RectangleShape,
+        containerColor = ReplayPanel,
+        title = { Text("POLÍTICA DE PRIVACIDADE", fontWeight = FontWeight.Black) },
+        text = {
+            Column(
+                Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("TG Media Library é uma aplicação independente e não é oficial nem afiliada à Telegram.", fontWeight = FontWeight.Bold)
+                Text("A app liga diretamente aos serviços Telegram através da TDLib para autenticar a tua conta e apresentar media da tua própria conta.")
+                Text("As credenciais API, a chave da base TDLib e os dados de bloqueio ficam armazenados localmente. Dados sensíveis são protegidos com mecanismos suportados pelo Android Keystore.")
+                Text("O PIN não é guardado em texto simples. A app guarda apenas um verificador derivado com salt aleatório.")
+                Text("A app não possui backend próprio para receber os teus vídeos, credenciais ou mensagens e não inclui SDK de publicidade ou analytics do programador.")
+                Text("Vídeos podem ser descarregados temporariamente para reprodução, download ou partilha. As cópias temporárias são limpas pelos controlos de privacidade. Ficheiros que guardes explicitamente em Downloads permanecem no dispositivo até os apagares.")
+                Text("Quando escolhes partilhar um ficheiro, esse ficheiro é fornecido à aplicação de destino que selecionares. Telegram processa os dados da tua conta segundo os seus próprios termos e política de privacidade.")
+                Text("Podes apagar os dados locais da TG Media Library através das definições de armazenamento do Android ou desinstalando a app. A app não cria uma conta separada no servidor do programador.")
+                Text("A versão integral e atualizada desta política está publicada no repositório público do projeto.", color = ReplayMuted)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                shape = RectangleShape,
+                colors = ButtonDefaults.buttonColors(containerColor = ReplayAcid, contentColor = ReplayInk)
+            ) { Text("FECHAR", fontWeight = FontWeight.Black) }
+        }
+    )
 }
 
 @Composable
@@ -116,9 +163,7 @@ private fun PrivacyShell(
         contentAlignment = Alignment.Center
     ) {
         Box(Modifier.fillMaxWidth()) {
-            Box(
-                Modifier.matchParentSize().offset(7.dp, 7.dp).background(ReplayInk)
-            )
+            Box(Modifier.matchParentSize().offset(7.dp, 7.dp).background(ReplayInk))
             Column(
                 Modifier
                     .fillMaxWidth()
