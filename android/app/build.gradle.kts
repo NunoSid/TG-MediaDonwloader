@@ -15,14 +15,14 @@ val hasReleaseSigning = !releaseStorePath.isNullOrBlank() &&
 
 android {
     namespace = "pt.nunosid.tgmedialibrary"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "pt.nunosid.tgmedialibrary"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 10
-        versionName = "0.9.0"
+        targetSdk = 36
+        versionCode = 11
+        versionName = "1.0.0"
     }
 
     signingConfigs {
@@ -32,6 +32,10 @@ android {
                 storePassword = releaseStorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
             }
         }
     }
