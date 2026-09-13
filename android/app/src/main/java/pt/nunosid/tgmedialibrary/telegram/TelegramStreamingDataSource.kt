@@ -2,6 +2,7 @@ package pt.nunosid.tgmedialibrary.telegram
 
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
 import androidx.media3.datasource.DataSpec
 import org.drinkless.tdlib.TdApi
@@ -12,6 +13,7 @@ import java.io.RandomAccessFile
  * Only the range needed by the player is fetched. Segment closes only cancel the current
  * range; the enclosing player screen purges the TDLib file when playback ends/locks.
  */
+@UnstableApi
 class TelegramStreamingDataSource(
     private val engine: TelegramEngine,
     private val fileId: Int,
