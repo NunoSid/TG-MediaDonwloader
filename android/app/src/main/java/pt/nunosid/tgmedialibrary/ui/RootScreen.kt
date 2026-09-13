@@ -28,13 +28,16 @@ import pt.nunosid.tgmedialibrary.ui.theme.ReplayPink
 
 @Composable
 fun RootScreen(viewModel: LibraryViewModel, onPlay: (VideoItem) -> Unit) {
+    val configured by viewModel.privacyConfigured.collectAsState()
     val unlocked by viewModel.privacyUnlocked.collectAsState()
 
+    if (!configured) {
+        PrivacyPinSetupScreen(onSetPin = viewModel::setPrivacyPin)
+        return
+    }
+
     if (!unlocked) {
-        CalculatorLockScreen(
-            onUnlock = viewModel::tryUnlock,
-            onPanic = viewModel::panicWipe
-        )
+        PrivacyLockScreen(onUnlock = viewModel::tryUnlock)
         return
     }
 
