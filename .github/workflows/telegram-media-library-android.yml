@@ -35,17 +35,33 @@ jobs:
         working-directory: android
         run: bash scripts/fetch-tdlib.sh
 
-      - name: Build debug and unsigned release APKs
+      - name: Build debug and compile-check release APKs
         working-directory: android
         run: gradle :app:assembleDebug :app:assembleRelease --stacktrace
 
+      - name: Check permanent release signing configuration
+        id: signing
+        shell: bash
+        run: |
+          if [[ -n "$RELEASE_KEYSTORE_B64" && -n "$RELEASE_STORE_PASSWORD" && -n "$RELEASE_KEY_ALIAS" && -n "$RELEASE_KEY_PASSWORD" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Permanent Android release signing is configured."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Permanent Android release signing secrets are not fully configured. No release APK will be published by this run."
+          fi
+
       - name: Decode permanent release keystore
-        if: ${{ env.RELEASE_KEYSTORE_B64 != '' }}
+        if: ${{ steps.signing.outputs.available == 'true' }}
         working-directory: android
-        run: echo "$RELEASE_KEYSTORE_B64" | base64 --decode > release-keystore.jks
+        shell: bash
+        run: |
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > release-keystore.jks
+          test -s release-keystore.jks
+          chmod 600 release-keystore.jks
 
       - name: Build signed release APK
-        if: ${{ env.RELEASE_KEYSTORE_B64 != '' }}
+        if: ${{ steps.signing.outputs.available == 'true' }}
         working-directory: android
         env:
           ANDROID_KEYSTORE_PATH: release-keystore.jks
@@ -54,14 +70,35 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ env.RELEASE_KEY_PASSWORD }}
         run: gradle :app:assembleRelease --stacktrace
 
+      - name: Verify signed APK and certificate
+        if: ${{ steps.signing.outputs.available == 'true' }}
+        shell: bash
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          if [[ -z "$APKSIGNER" ]]; then
+            echo "::error::apksigner was not found in Android build-tools."
+            exit 1
+          fi
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
           name: TelegramMediaLibrary-debug
           path: android/app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Upload release APK
+      - name: Upload signed release APK
+        if: ${{ steps.signing.outputs.available == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: TelegramMediaLibrary-release
-          path: android/app/build/outputs/apk/release/*.apk
+          name: TelegramMediaLibrary-release-signed
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Remove decoded signing material
+        if: ${{ always() && steps.signing.outputs.available == 'true' }}
+        working-directory: android
+        shell: bash
+        run: rm -f release-keystore.jks
