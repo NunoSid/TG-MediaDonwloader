@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">Telegram Media Library</string>
+    <string name="app_name">TG Media Library</string>
+    <string name="app_description">Private local media library for your own Telegram account.</string>
 </resources>
