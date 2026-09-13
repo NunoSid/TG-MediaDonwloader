@@ -18,6 +18,7 @@ import pt.nunosid.tgmedialibrary.model.HistoryScope
 import pt.nunosid.tgmedialibrary.model.VideoFilters
 import pt.nunosid.tgmedialibrary.model.VideoItem
 import pt.nunosid.tgmedialibrary.model.VideoSort
+import pt.nunosid.tgmedialibrary.security.PrivacyPinStore
 import pt.nunosid.tgmedialibrary.telegram.TelegramAuthState
 import pt.nunosid.tgmedialibrary.telegram.TelegramEngine
 import java.util.UUID
@@ -26,9 +27,13 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     val engine = TelegramEngine(application)
     private val repository = TelegramVideoRepository(engine)
     private val presetPrefs = application.getSharedPreferences("filter_presets", Context.MODE_PRIVATE)
+    private val pinStore = PrivacyPinStore(application)
 
     val authState = engine.authState
     val connectionLabel = engine.connectionLabel
+
+    private val _privacyConfigured = MutableStateFlow(pinStore.isConfigured())
+    val privacyConfigured: StateFlow<Boolean> = _privacyConfigured.asStateFlow()
 
     private val _privacyUnlocked = MutableStateFlow(false)
     val privacyUnlocked: StateFlow<Boolean> = _privacyUnlocked.asStateFlow()
@@ -64,8 +69,17 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun setPrivacyPin(pin: String): Boolean {
+        val ok = pinStore.setPin(pin)
+        if (ok) {
+            _privacyConfigured.value = true
+            _privacyUnlocked.value = true
+        }
+        return ok
+    }
+
     fun tryUnlock(code: String): Boolean {
-        val ok = code == ENTRY_CODE
+        val ok = pinStore.verify(code)
         if (ok) _privacyUnlocked.value = true
         return ok
     }
@@ -78,18 +92,6 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
 
     fun purgeExternalShareCache() {
         engine.purgePrivacyCaches()
-    }
-
-    fun panicWipe() {
-        ThumbnailMemoryCache.clear()
-        _privacyUnlocked.value = false
-        _videos.value = emptyList()
-        _filters.value = VideoFilters()
-        _filterPresets.value = emptyList()
-        _loadedCount.value = 0
-        _indexedPages.value = 0
-        presetPrefs.edit().clear().commit()
-        engine.panicWipeLocal()
     }
 
     fun configureApi(apiId: String, apiHash: String) = engine.configureApi(apiId, apiHash)
@@ -204,8 +206,6 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     }
 
     companion object {
-        private const val ENTRY_CODE = "21031991"
-        const val PANIC_CODE = "112"
         private const val PRESETS_KEY = "presets_json"
     }
 }
